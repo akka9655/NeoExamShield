@@ -1,0 +1,19 @@
+# Unwanted markdown diagnostic & token dumps
+*.md
+!README.md
+
+# Build archives & zip packages
+*.zip
+*.tar.gz
+/dist
+/build
+
+# Web project directory (separate repository)
+/web
+
+# OS & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
