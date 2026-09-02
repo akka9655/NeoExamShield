@@ -21,6 +21,7 @@ if (typeof window.isMac === 'undefined') {
     // Fallback: find first non-readonly ACE editor
     const editors = document.querySelectorAll('.ace_editor');
     for (const el of editors) {
+      if (el.id && (el.id.includes('ttHeaderEditor') || el.id.includes('ttFooterEditor'))) continue;
       try {
         const ed = ace.edit(el);
         if (!ed.getReadOnly()) return ed;
@@ -37,12 +38,17 @@ if (typeof window.isMac === 'undefined') {
 
   // Function to detect question changes and reset typing state
   function checkForQuestionChange() {
-    const questionElement = document.querySelector("#content-left > content-left > div > div.t-h-full > testtaking-question > div > div.t-flex.t-items-center.t-justify-between.t-whitespace-nowrap.t-px-10.t-py-8.lg\\:t-py-8.lg\\:t-px-20.t-bg-primary\\/\\[0\\.1\\].t-border-b.t-border-solid.t-border-b-neutral-2.t-min-h-\\[30px\\].lg\\:t-min-h-\\[35px\\].ng-star-inserted > div:nth-child(1) > div > div");
-    
-    if (questionElement) {
-      const questionText = questionElement.textContent;
-      const match = questionText.match(/Question No : (\d+) \/ \d+/);
-      const currentQuestionNumber = match ? match[1] : null;
+    let currentQuestionNumber = null;
+    const qEls = document.querySelectorAll('div, span');
+    for (const el of qEls) {
+      if (el.textContent && el.textContent.includes('Question No :')) {
+        const match = el.textContent.match(/Question No : (\d+)/);
+        if (match) {
+          currentQuestionNumber = match[1];
+          break;
+        }
+      }
+    }
       
       // If question changed, reset typing state
       if (currentQuestionNumber && currentQuestionNumber !== lastQuestionNumber) {
@@ -68,7 +74,8 @@ if (typeof window.isMac === 'undefined') {
     if (lineIndex < codeLines.length) {
       const currentLine = codeLines[lineIndex];
 
-      if (currentLine.trim().startsWith("//")) {
+      const trimmedLine = currentLine.trim();
+      if (trimmedLine.startsWith("//") || trimmedLine.startsWith("#") || trimmedLine.startsWith("/*") || trimmedLine.startsWith("*")) {
         lineIndex++;
         charIndex = 0;
         typeNextCharacter();
@@ -76,14 +83,10 @@ if (typeof window.isMac === 'undefined') {
       }
 
       if (charIndex < currentLine.length) {
-        editor.setValue(editor.getValue() + currentLine[charIndex]);
-        editor.clearSelection(); // Clear selection
-        editor.navigateFileEnd(); // Move cursor to end
+        editor.insert(currentLine[charIndex]);
         charIndex++;
       } else {
-        editor.setValue(editor.getValue() + "\n");
-        editor.clearSelection(); // Clear selection
-        editor.navigateFileEnd(); // Move cursor to end
+        editor.insert("\n");
         lineIndex++;
         charIndex = 0;
       }

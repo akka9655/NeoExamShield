@@ -271,10 +271,10 @@ async function handleQuestionExtraction() {
 
 // Function to extract coding question details
 async function extractCodingQuestion(isTyped = false) {
-    // Extract programming language and normalize (e.g. "C (17)" -> "C")
+    // Extract programming language and normalize (e.g. "C (17)" -> "C", "Java (openjdk 13.0.1)" -> "Java")
     const programmingLanguageElement = document.querySelector('span.inner-text');
     let rawLang = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'C';
-    const programmingLanguage = rawLang.replace(/\s*\(\d+.*?\)/, '').trim();
+    const programmingLanguage = rawLang.replace(/\s*\([^)]*\)/g, '').trim();
 
     // Extract question components
     const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
@@ -299,8 +299,8 @@ async function extractCodingQuestion(isTyped = false) {
     if (containers.length > 0) {
         console.log('[Test Cases] Method 1: Found', containers.length, 'test case containers');
         containers.forEach((container) => {
-            const inputPre = container.querySelector('div[aria-labelledby="each-tc-input-container"] pre');
-            const outputPre = container.querySelector('div[aria-labelledby="each-tc-output-container"] pre');
+            const inputPre = container.querySelector('div[aria-labelledby="each-tc-input-container"] pre, [class*="each-tc-input"] pre, pre[aria-labelledby="each-tc-input"]');
+            const outputPre = container.querySelector('div[aria-labelledby="each-tc-output-container"] pre, div[arai-label="each-tc-output-container"] pre, [class*="each-tc-output"] pre, pre[aria-labelledby="each-tc-output"]');
             
             if (inputPre && outputPre) {
                 testCases.push({
@@ -799,14 +799,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
             } else {
                 // Original logic for other platforms (Examly)
-                const optionMatch = request.response.match(/(?:options?\s*)?(\d+)\.?/i);
+                const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
                 if (optionMatch) {
-                    const optionNumber = parseInt(optionMatch[1])-1;
+                    let optionNumber;
+                    if (isNaN(optionMatch[1])) {
+                        optionNumber = optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
+                    } else {
+                        optionNumber = parseInt(optionMatch[1]) - 1;
+                    }
                     // Use the same selector as the primary Iamneo answer flow.
-                    const answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`);
+                    const answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`) || document.querySelector(`#tt-option-${optionNumber} input[type="radio"]`);
                     
                     if (answerElement) {
-                        answerElement.dispatchEvent(new Event("click", { bubbles: true }));
+                        answerElement.click();
                         console.log(`Option element ${optionNumber + 1} clicked successfully`);
                     } else {
                         chrome.runtime.sendMessage({

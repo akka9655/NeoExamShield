@@ -708,9 +708,13 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                                 ed.navigateFileEnd();
                             } catch(e) {}
                         } else {
-                            // Fallback: try all editors but skip readonly ones
+                            // Fallback: try all editors but skip readonly ones and header/footer snippets
                             var editors = document.querySelectorAll('.ace_editor');
                             editors.forEach(function(el) {
+                                // Skip header/footer editors
+                                if (el.id && (el.id.includes('ttHeaderEditor') || el.id.includes('ttFooterEditor'))) {
+                                    return;
+                                }
                                 try {
                                     var ed = ace.edit(el);
                                     if (!ed.getReadOnly()) {
