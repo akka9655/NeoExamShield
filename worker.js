@@ -599,62 +599,7 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
 // Comprehensive, bulletproof Code Sanitizer to guarantee only pure compilable code
 function cleanCodeOutput(rawText) {
     if (!rawText || typeof rawText !== 'string') return '';
-
-    let text = rawText.trim();
-
-    // 1. If markdown code fences exist (```c ... ``` or ``` ... ```)
-    const codeBlockMatches = [...text.matchAll(/```(?:[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```/g)];
-    if (codeBlockMatches.length > 0) {
-        // Pick the largest code block (the actual source code)
-        let bestCode = '';
-        for (const m of codeBlockMatches) {
-            if (m[1] && m[1].trim().length > bestCode.length) {
-                bestCode = m[1].trim();
-            }
-        }
-        if (bestCode) {
-            text = bestCode;
-        }
-    } else {
-        // Strip leading and trailing ``` markers if unclosed
-        text = text.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-    }
-
-    // 2. If the text STILL contains markdown commentary or bullet points (* Sample 1: ...)
-    // Locate the first true code declaration line
-    const codeStartRegex = /^(#include|import\s+|from\s+|package\s+|public\s+class|class\s+|def\s+|int\s+main|void\s+main|using\s+namespace|#define)/m;
-    const matchPos = text.search(codeStartRegex);
-    if (matchPos !== -1) {
-        text = text.substring(matchPos);
-    }
-
-    // 3. Strip conversational intro lines if any remain
-    const lines = text.split('\n');
-    while (lines.length > 0) {
-        const firstLine = lines[0].trim();
-        const isIntro = /^(here\s+(is|are)|an?\s+(elegant|robust|simple|efficient|complete|correct|working)\s+|sure|below\s+is|this\s+(code|solution|program)|solution:?|code:?|\*|\$|Sample\s+\d+|Input\s+\d+|Output\s+\d+)/i.test(firstLine) &&
-            !/^(#include|import|package|public|class|def|int|void|using|const|let|var|\/\/|\/\*)/i.test(firstLine);
-
-        if (isIntro) {
-            lines.shift();
-        } else {
-            break;
-        }
-    }
-
-    // 4. Strip conversational closing remarks from bottom
-    while (lines.length > 0) {
-        const lastLine = lines[lines.length - 1].trim();
-        const isOutro = /^(hope\s+this|let\s+me\s+know|feel\s+free|this\s+handles|note:|explanation:|\*|\$|Sample\s+\d+|Input\s+\d+|Output\s+\d+)/i.test(lastLine);
-
-        if (isOutro) {
-            lines.pop();
-        } else {
-            break;
-        }
-    }
-
-    return lines.join('\n').trim();
+    return rawText.trim().replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
 }
 
 function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false) {
@@ -1240,22 +1185,19 @@ IMPORTANT REQUIREMENTS:
 ${request.question}
 
 Respond with ONLY the ${request.programmingLanguage} code:`;
-                    } else {
-                        // Strict, high-accuracy competitive programming prompt
-                        const targetLang = (request.programmingLanguage || 'C').trim();
-                        queryText = `You are an expert competitive programmer. Write a 100% correct, complete, and optimal ${targetLang} program that solves this problem and passes ALL test cases (including hidden edge cases).
-
-CRITICAL REQUIREMENTS:
-- Output ONLY the raw executable ${targetLang} source code.
-- Absolutely NO markdown code fences (no \`\`\` or \`\`\`${targetLang.toLowerCase()}).
-- Absolutely NO conversational sentences, explanations, or sample trace breakdowns.
-- Start directly with the code (e.g. #include, import, def, etc.).
-- Strictly follow the required input/output format, exact string spellings, and decimal precision.
-
-Problem Statement:
-${request.question}
-
-${targetLang ? `Programming Language: ${targetLang}\n` : ''}${request.inputFormat ? `Input Format:\n${request.inputFormat}\n` : ''}${request.outputFormat ? `Output Format:\n${request.outputFormat}\n` : ''}${request.constraints ? `Code Constraints:\n${request.constraints}\n` : ''}${request.testCases ? `Sample Test Cases:\n${request.testCases}\n` : ''}${request.whitelist ? `Whitelisted Keywords Required:\n${request.whitelist}\n` : ''}${request.headerSnippet ? `Header Snippet (DO NOT duplicate):\n${request.headerSnippet}\n` : ''}${request.footerSnippet ? `Footer Snippet (DO NOT duplicate):\n${request.footerSnippet}\n` : ''}`;
+                        // Original legacy prompt for highest C language accuracy
+                        queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
+                            Ensure the code: Meets the requirements outlined in the problem statement.
+                            Stricly Passes all test cases, including edge cases and boundary conditions.
+                            Always get the input from the users.` +
+                            `Question:\n${request.question}\n\n` +
+                            (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}` : '') +
+                        (request.inputFormat ? `Input Format:\n${request.inputFormat}\n\n` : '') +
+                        (request.outputFormat ? `Output Format:\n${request.outputFormat}\n\n` : '') +
+                        (request.testCases ? `Test Cases:\n${request.testCases}` : '') +
+                        (request.headerSnippet ? `\n\nHeader Snippet (pre-existing code before your answer, DO NOT include this in your response):\n${request.headerSnippet}` : '') +
+                        (request.footerSnippet ? `\n\nFooter Snippet (pre-existing code after your answer, DO NOT include this in your response):\n${request.footerSnippet}` : '') +
+                        (request.whitelist ? `\n\nWhitelisted Keywords (you MUST use these keywords/identifiers in your solution):\n${request.whitelist}` : '');
                     }
                 } else {
                     // MCQ handling with support for multiple choice

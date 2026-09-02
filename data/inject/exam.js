@@ -149,45 +149,7 @@ if (typeof window.isMac === 'undefined') {
 
   function cleanPureCode(raw) {
     if (!raw || typeof raw !== 'string') return '';
-    let str = raw.trim();
-    // Extract largest block inside markdown ``` if present
-    const codeBlockMatches = [...str.matchAll(/```(?:[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```/g)];
-    if (codeBlockMatches.length > 0) {
-      let bestCode = '';
-      for (const m of codeBlockMatches) {
-        if (m[1] && m[1].trim().length > bestCode.length) {
-          bestCode = m[1].trim();
-        }
-      }
-      if (bestCode) str = bestCode;
-    } else {
-      str = str.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-    }
-    // Locate true code start
-    const codeStartRegex = /^(#include|import\s+|from\s+|package\s+|public\s+class|class\s+|def\s+|int\s+main|void\s+main|using\s+namespace|#define)/m;
-    const matchPos = str.search(codeStartRegex);
-    if (matchPos !== -1) {
-      str = str.substring(matchPos);
-    }
-    const lines = str.split('\n');
-    while (lines.length > 0) {
-      const first = lines[0].trim();
-      if (/^(here\s+(is|are)|an?\s+(elegant|robust|simple|efficient|complete|correct|working)\s+|sure|below\s+is|this\s+(code|solution|program)|solution:?|code:?|\*|\$|Sample\s+\d+|Input\s+\d+|Output\s+\d+)/i.test(first) &&
-          !/^(#include|import|package|public|class|def|int|void|using|const|let|var|\/\/|\/\*)/i.test(first)) {
-        lines.shift();
-      } else {
-        break;
-      }
-    }
-    while (lines.length > 0) {
-      const last = lines[lines.length - 1].trim();
-      if (/^(hope\s+this|let\s+me\s+know|feel\s+free|this\s+handles|note:|explanation:|\*|\$|Sample\s+\d+|Input\s+\d+|Output\s+\d+)/i.test(last)) {
-        lines.pop();
-      } else {
-        break;
-      }
-    }
-    return lines.join('\n').trim();
+    return raw.trim().replace(/^```[a-zA-Z0-9_-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
   }
 
   // Exposed for worker.js/contentScript to call via script injection (page context)
