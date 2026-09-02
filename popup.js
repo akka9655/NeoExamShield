@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateUIState(isLinked, rollNo = '', keyCount = 0) {
         if (isLinked) {
             if (syncStatusDiv) {
-                const label = rollNo ? `✓ Linked (${rollNo})` : '✓ Linked';
+                const label = '✓ Linked';
                 syncStatusDiv.textContent = keyCount > 0 ? `${label} • ${keyCount} Key${keyCount > 1 ? 's' : ''}` : label;
                 syncStatusDiv.style.color = '#10B981';
             }
