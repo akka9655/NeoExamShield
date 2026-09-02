@@ -1185,6 +1185,7 @@ IMPORTANT REQUIREMENTS:
 ${request.question}
 
 Respond with ONLY the ${request.programmingLanguage} code:`;
+                    } else {
                         // Original legacy prompt for highest C language accuracy
                         queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
                             Ensure the code: Meets the requirements outlined in the problem statement.
