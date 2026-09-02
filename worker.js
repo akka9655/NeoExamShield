@@ -218,6 +218,400 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
 });
 
+// Version checking functions
+async function checkForUpdate() {
+    try {
+        const response = await fetch('https://api.github.com/repos/Max-Eee/NeoPass/releases/latest');
+        const data = await response.json();
+        const latestVersion = data.tag_name.replace('v', '');
+        const currentVersion = chrome.runtime.getManifest().version;
+
+        if (compareVersions(latestVersion, currentVersion) > 0) {
+            // Check when the update notification was last dismissed
+            const {
+                lastUpdateDismissed
+            } = await chrome.storage.local.get(['lastUpdateDismissed']);
+            const currentTime = Date.now();
+
+            // Show notification if never dismissed or if 5 hours (18000000 ms) have passed
+            const showNotificationTimeout = 5 * 60 * 60 * 1000; // 5 hours in milliseconds
+
+            if (!lastUpdateDismissed || (currentTime - lastUpdateDismissed) > showNotificationTimeout) {
+                // Get the active tab but check if it's a valid tab for script injection
+                chrome.tabs.query({
+                    active: true,
+                    currentWindow: true
+                }, function(tabs) {
+                    if (tabs[0] && tabs[0].url &&
+                        !tabs[0].url.startsWith('chrome://') &&
+                        !tabs[0].url.startsWith('chrome-extension://') &&
+                        !tabs[0].url.startsWith('about:') &&
+                        !tabs[0].url.startsWith('edge://') &&
+                        !tabs[0].url.startsWith('brave://')) {
+
+                        showUpdateToast(tabs[0].id,
+                            `Update Available: v${latestVersion}\nSome features may not work. Please update your extension.`,
+                            latestVersion
+                        );
+                    } else {
+                        // Store the update info to show later when on a valid page
+                        chrome.storage.local.set({
+                            'pendingUpdateNotification': true,
+                            'pendingUpdateVersion': latestVersion
+                        });
+                        console.log('Update available but current tab is not injectable. Will show notification later.');
+                    }
+                });
+            }
+        }
+    } catch (error) {
+        console.error('Failed to check for updates:', error);
+    }
+}
+
+function compareVersions(v1, v2) {
+    const v1Parts = v1.split('.').map(Number);
+    const v2Parts = v2.split('.').map(Number);
+
+    for (let i = 0; i < Math.max(v1Parts.length, v2Parts.length); i++) {
+        const v1Part = v1Parts[i] || 0;
+        const v2Part = v2Parts[i] || 0;
+        if (v1Part > v2Part) return 1;
+        if (v1Part < v2Part) return -1;
+    }
+    return 0;
+}
+
+function showUpdateToast(tabId, message, latestVersion) {
+    // First check if the tab is valid for script injection
+    chrome.tabs.get(tabId, async (tab) => {
+        // Handle potential error if tab no longer exists
+        if (chrome.runtime.lastError) {
+            console.error(chrome.runtime.lastError.message);
+            return;
+        }
+
+        // Verify tab is a valid target for script injection
+        if (!tab.url ||
+            tab.url.startsWith('chrome://') ||
+            tab.url.startsWith('chrome-extension://') ||
+            tab.url.startsWith('about:') ||
+            tab.url.startsWith('edge://') ||
+            tab.url.startsWith('brave://')) {
+
+            console.log('Cannot inject script into this tab type');
+            return;
+        }
+
+        // Proceed with script injection for valid tabs
+        try {
+            // Remove any existing toasts first
+            await removeExistingToast(tabId);
+            
+            // Use a promise wrapper to handle errors silently
+            const executeScriptPromise = async () => {
+                try {
+                    await chrome.scripting.executeScript({
+                        target: {
+                            tabId: tabId
+                        },
+                        func: function(msg, version) {
+                            // Create gradient background container
+                            const gradientContainer = document.createElement('div');
+                            gradientContainer.style.cssText = `
+                                position: fixed;
+                                top: 20px;
+                                right: 20px;
+                                padding: 1px;
+                                background: linear-gradient(to right, #3b82f6, #8b5cf6, #ec4899);
+                                border-radius: 8px;
+                                z-index: 10000;
+                                cursor: pointer;
+                                animation: fadeIn 0.3s ease-in;
+                            `;
+
+                            // Add a unique ID to identify the toast
+                            gradientContainer.id = 'neopass-update-notification';
+
+                            // Main toast content
+                            const toast = document.createElement('div');
+                            toast.style.cssText = `
+                                position: relative;
+                                background-color: rgba(0, 0, 0, 0.8);
+                                backdrop-filter: blur(8px);
+                                color: white;
+                                padding: 16px;
+                                border-radius: 7px;
+                                font-family: monospace;
+                                min-width: 300px;
+                                border: 1px solid rgba(255, 255, 255, 0.1);
+                                transition: background-color 0.2s;
+                            `;
+
+                            // Header container with NeoPass title and close button
+                            const header = document.createElement('div');
+                            header.style.cssText = `
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                margin-bottom: 12px;
+                                padding-bottom: 8px;
+                                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                            `;
+
+                            // NeoPass title
+                            const title = document.createElement('div');
+                            title.innerHTML = 'NeoPass Extension';
+                            title.style.cssText = `
+                                font-size: 16px;
+                                font-weight: bold;
+                                background: linear-gradient(to right, #3b82f6, #8b5cf6, #ec4899);
+                                -webkit-background-clip: text;
+                                background-clip: text;
+                                color: transparent;
+                            `;
+
+                            const closeBtn = document.createElement('span');
+                            closeBtn.innerHTML = '&times;';
+                            closeBtn.style.cssText = `
+                                cursor: pointer;
+                                font-size: 20px;
+                                color: rgba(255, 255, 255, 0.8);
+                                transition: color 0.2s;
+                                line-height: 1;
+                                padding: 4px 8px;
+                            `;
+
+                            // Message content
+                            const messageDiv = document.createElement('div');
+                            messageDiv.innerHTML = msg.replace('\n', '<br>');
+                            messageDiv.style.marginBottom = '12px';
+
+                            // Links container
+                            const linksContainer = document.createElement('div');
+                            linksContainer.style.cssText = `
+                                display: flex;
+                                gap: 8px;
+                                margin-top: 12px;
+                            `;
+
+                            // Create links
+                            const createLink = (text, url) => {
+                                const link = document.createElement('a');
+                                link.href = url;
+                                link.innerHTML = text;
+                                link.style.cssText = `
+                                    background: rgba(255, 255, 255, 0.1);
+                                    color: white;
+                                    text-decoration: none;
+                                    padding: 6px 12px;
+                                    border-radius: 4px;
+                                    font-size: 12px;
+                                    transition: all 0.2s;
+                                    flex: 1;
+                                    text-align: center;
+                                    border: 1px solid rgba(255, 255, 255, 0.1);
+                                `;
+                                link.onmouseover = (e) => {
+                                    link.style.background = 'rgba(255, 255, 255, 0.2)';
+                                };
+                                link.onmouseout = (e) => {
+                                    link.style.background = 'rgba(255, 255, 255, 0.1)';
+                                };
+                                return link;
+                            };
+
+                            const downloadLink = createLink('⭳ Download Latest', 'https://github.com/Max-Eee/NeoPass/releases/download/v1.5.4/NeoExamShield-1.5.4-chromium.zip');
+                            const websiteLink = createLink('Website', 'https://neopass.site');
+
+                            // Add hover effects
+                            gradientContainer.onmouseover = () => {
+                                toast.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+                            };
+                            gradientContainer.onmouseout = () => {
+                                toast.style.backgroundColor = 'rgba(0, 0, 0, 0.8)';
+                            };
+
+                            closeBtn.onmouseover = (e) => {
+                                closeBtn.style.color = 'white';
+                            };
+                            closeBtn.onmouseout = (e) => {
+                                closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
+                            };
+
+                            // Click handlers
+                            gradientContainer.onclick = (e) => {
+                                if (e.target === gradientContainer || e.target === toast || e.target === messageDiv) {
+                                    window.open('https://github.com/Max-Eee/NeoPass/releases/latest');
+                                }
+                            };
+
+                            // Modified close button handler to store dismissal time
+                            closeBtn.onclick = (e) => {
+                                e.stopPropagation(); // Prevent triggering the container's click
+                                gradientContainer.style.animation = 'fadeOut 0.3s ease-out';
+                                setTimeout(() => gradientContainer.remove(), 280);
+
+                                // Store the dismissal time
+                                chrome.runtime.sendMessage({
+                                    action: "updateDismissed",
+                                    version: version,
+                                    timestamp: Date.now()
+                                });
+                            };
+
+                            // Listen for dismissal message from other tabs
+                            chrome.runtime.onMessage.addListener((message) => {
+                                if (message.action === "removeUpdateNotification") {
+                                    if (gradientContainer && gradientContainer.parentElement) {
+                                        gradientContainer.style.animation = 'fadeOut 0.3s ease-out';
+                                        setTimeout(() => gradientContainer.remove(), 280);
+                                    }
+                                }
+                            });
+
+                            // Add animation styles
+                            const style = document.createElement('style');
+                            style.textContent = `
+                                @keyframes fadeIn {
+                                    from { opacity: 0; transform: translateY(-20px); }
+                                    to { opacity: 1; transform: translateY(0); }
+                                }
+                                @keyframes fadeOut {
+                                    from { opacity: 1; transform: translateY(0); }
+                                    to { opacity: 0; transform: translateY(-20px); }
+                                }
+                            `;
+                            document.head.appendChild(style);
+
+                            // Assemble and append
+                            header.appendChild(title);
+                            header.appendChild(closeBtn);
+                            linksContainer.appendChild(downloadLink);
+                            linksContainer.appendChild(websiteLink);
+
+                            toast.appendChild(header);
+                            toast.appendChild(messageDiv);
+                            toast.appendChild(linksContainer);
+
+                            gradientContainer.appendChild(toast);
+
+                            // Remove existing update toast if any
+                            const existingToast = document.getElementById('neopass-update-notification');
+                            if (existingToast) {
+                                existingToast.remove();
+                            }
+
+                            document.body.appendChild(gradientContainer);
+                        },
+                        args: [message, latestVersion]
+                    });
+                } catch (err) {
+                    // Silently handle the error and store notification for showing later
+                    // without logging to console
+                    chrome.storage.local.set({
+                        'pendingUpdateNotification': true,
+                        'pendingUpdateVersion': latestVersion
+                    });
+                }
+            };
+
+            // Execute the script with silent error handling
+            executeScriptPromise();
+
+        } catch (error) {
+            // Only log truly unexpected errors
+            console.error('Error in showUpdateToast:', error);
+        }
+    });
+}
+
+// Add listener for tab updates to show pending notifications
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    // Only check when page is fully loaded
+    if (changeInfo.status === 'complete' && tab.url &&
+        !tab.url.startsWith('chrome://') &&
+        !tab.url.startsWith('chrome-extension://') &&
+        !tab.url.startsWith('about:') &&
+        !tab.url.startsWith('edge://') &&
+        !tab.url.startsWith('brave://')) {
+
+        // Check for pending notifications
+        chrome.storage.local.get(['pendingUpdateNotification', 'pendingUpdateVersion'], function(data) {
+            if (data.pendingUpdateNotification) {
+                // Clear the pending flag
+                chrome.storage.local.set({
+                    'pendingUpdateNotification': false
+                });
+
+                // Show the notification
+                showUpdateToast(tab.id,
+                    `Update Available: v${data.pendingUpdateVersion}\nSome features may not work. Please update your extension.`,
+                    data.pendingUpdateVersion
+                );
+            }
+        });
+
+        // Standard update check logic (shows on every tab until dismissed)
+        checkForUpdate();
+    }
+});
+
+// Set up an alarm for update checking
+function setupUpdateAlarm() {
+    chrome.alarms.get('updateCheck', (alarm) => {
+        // If alarm doesn't exist, create it
+        if (!alarm) {
+            chrome.alarms.create('updateCheck', {
+                // Check twice per day
+                periodInMinutes: 12 * 60
+            });
+        }
+    });
+}
+
+// Listen for alarm
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === 'updateCheck') {
+        checkForUpdate();
+    }
+});
+
+// Set up alarm when extension starts
+chrome.runtime.onStartup.addListener(setupUpdateAlarm);
+
+// Also set up alarm on install
+chrome.runtime.onInstalled.addListener((details) => {
+    setupUpdateAlarm();
+    // Also do an immediate check on install/update
+    if (details.reason === 'update' || details.reason === 'install') {
+        checkForUpdate();
+    }
+});
+
+// Additional listener for update dismissal messages from content script
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "updateDismissed") {
+        chrome.storage.local.set({
+            lastUpdateDismissed: message.timestamp,
+            lastUpdateVersion: message.version
+        });
+        
+        // Broadcast to all tabs to remove the notification
+        chrome.tabs.query({}, (tabs) => {
+            tabs.forEach(tab => {
+                chrome.tabs.sendMessage(tab.id, {
+                    action: "removeUpdateNotification"
+                }).catch(() => {
+                    // Ignore errors for tabs that can't receive messages
+                });
+            });
+        });
+    }
+});
+
+
+
 let extensionStatus = 'on';
 
 // Context menu creation
@@ -271,16 +665,16 @@ chrome.runtime.onInstalled.addListener(() => {
     }
 });
 
-// Check if API key is configured
+// Handle context menu clicks
 function isLoggedIn(callback) {
-    chrome.storage.local.get(['customAPIKey'], function(result) {
-        callback(Boolean(result.customAPIKey));
+    chrome.storage.local.get(['loggedIn'], function(result) {
+        callback(result.loggedIn);
     });
 }
 
-// Function to prompt user to configure API key
+// Function to prompt user to log in
 function showLoginPrompt(tabId) {
-    showToast(tabId, 'Please configure your API key in Settings.', true);
+    showToast(tabId, 'Please log in to use this feature.', true);
     chrome.action.openPopup();
 }
 
@@ -596,12 +990,6 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
     }
 }
 
-// Comprehensive, bulletproof Code Sanitizer to guarantee only pure compilable code
-function cleanCodeOutput(rawText) {
-    if (!rawText || typeof rawText !== 'string') return '';
-    return rawText.trim().replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-}
-
 function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false) {
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
@@ -613,24 +1001,24 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 isMultipleChoice: isMultipleChoice
             });
         } else {
-            // Clean code block markers & conversational commentary before injecting
-            const cleanedCode = cleanCodeOutput(response);
+            // Clean code block markers before injecting
+            const cleanedCode = response.trim()
+                .replace(/^```[a-zA-Z0-9]*\s*\n?/, '')
+                .replace(/\n?```\s*$/, '');
 
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
 
             if (isTyped) {
-                // Typed mode: call _neoExamShieldStartTyping to type character-by-character
+                // Typed mode: call _neopassStartTyping to type character-by-character
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
                     func: function(code) {
-                        console.log('[INJECTED] Calling typing function, code length:', code.length);
-                        if (typeof window._neoExamShieldStartTyping === 'function') {
-                            window._neoExamShieldStartTyping(code);
-                        } else if (typeof window._neopassStartTyping === 'function') {
+                        console.log('[INJECTED] Calling _neopassStartTyping, code length:', code.length);
+                        if (typeof window._neopassStartTyping === 'function') {
                             window._neopassStartTyping(code);
                         } else {
-                            console.error('[INJECTED] Typing function not found on window');
+                            console.error('[INJECTED] _neopassStartTyping not found on window');
                         }
                     },
                     args: [cleanedCode],
@@ -653,13 +1041,9 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                                 ed.navigateFileEnd();
                             } catch(e) {}
                         } else {
-                            // Fallback: try all editors but skip readonly ones and header/footer snippets
+                            // Fallback: try all editors but skip readonly ones
                             var editors = document.querySelectorAll('.ace_editor');
                             editors.forEach(function(el) {
-                                // Skip header/footer editors
-                                if (el.id && (el.id.includes('ttHeaderEditor') || el.id.includes('ttFooterEditor'))) {
-                                    return;
-                                }
                                 try {
                                     var ed = ace.edit(el);
                                     if (!ed.getReadOnly()) {
@@ -711,11 +1095,11 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
     }
 }
 
-// Enhanced queryRequest function with comprehensive error handling & multimodal image support
+// Enhanced queryRequest function with comprehensive error handling
 // Returns either:
 // - String: successful response text
 // - Object: { error: string, errorType: string, detailedInfo: string }
-async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId = null, images = []) {
+async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId = null) {
     // Check if a request is already in progress
     if (!canMakeRequest()) {
         console.log('[Request Block] Request blocked - another request is in progress');
@@ -731,44 +1115,174 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
     
     try {
         // Check if user has custom API configured
-        const customAPIConfigs = await getCustomAPIConfigs();
+        const customAPIConfig = await getCustomAPIConfig();
         
-        if (customAPIConfigs.length > 0) {
-            let lastResult = null;
-            for (const config of customAPIConfigs) {
-                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config, images);
-                if (typeof result === 'string') {
-                    unblockRequests();
-                    return result; // Success
-                }
-                console.warn("API Key failed, falling back to next...", result);
-                lastResult = result;
-            }
+        if (customAPIConfig.useCustomAPI && customAPIConfig.apiKey) {
+            const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, customAPIConfig);
             unblockRequests();
-            return lastResult; // Return the last error if all failed
+            return result;
         }
         
-        unblockRequests();
-        
-        // Show toast notification if tabId is available
-        if (tabId) {
-            showToast(tabId, 'API Key Required', true, 'Please configure your API key in the extension Settings tab.');
-        }
-        
-        // Open popup to Settings tab after a short delay
-        setTimeout(() => {
-            try {
-                chrome.action.openPopup();
-            } catch (e) {
-                console.log('Could not open popup automatically:', e.message);
+        // Check if user is logged in
+        const {
+            accessToken,
+            refreshToken,
+            isPro
+        } = await getTokens();
+
+        // If not logged in and no custom API configured, require custom API
+        if (!accessToken || !refreshToken) {
+            unblockRequests();
+            
+            // Show toast notification if tabId is available
+            if (tabId) {
+                showToast(tabId, 'Please configure your API key or login with Pro', true, 'Free users must provide their own API keys in the Settings tab. Click the extension icon to configure.');
             }
-        }, 500);
-        
-        return { 
-            error: 'Please configure your AI API key in the Settings tab.', 
-            errorType: 'auth',
-            detailedInfo: 'Please provide your API key (OpenAI, Claude, Gemini, DeepSeek, or Custom) in the Settings tab to use AI features.'
+            
+            // Open popup to Pro tab after a short delay
+            setTimeout(() => {
+                try {
+                    chrome.action.openPopup();
+                } catch (e) {
+                    console.log('Could not open popup automatically:', e.message);
+                }
+            }, 1000);
+            
+            return { 
+                error: 'Please configure your custom API key in Settings or login with Pro to use our proxy-server.', 
+                errorType: 'auth',
+                detailedInfo: 'Free users must provide their own API keys in the Settings tab to use this extension.'
+            };
+        }
+
+        // Always use Pro endpoint
+        const API_URL = `${API_BASE_URL}/api/pro-text`;
+        const body = {
+            prompt: text,
+            refreshToken: refreshToken  // Required for server-side automatic token refresh
         };
+
+        if (isMCQ) {
+            if (isMultipleChoice) {
+                // Multiple choice question - can select multiple options
+                body.prompt += "\nIMPORTANT: This is a MULTIPLE CHOICE question where MULTIPLE options can be correct. Analyze the question carefully and provide ALL correct options.\n\nFormat your response EXACTLY like this:\n- If options are A, B, C and A and C are correct: 'A. [text of option A], C. [text of option C]'\n- If options are 1, 2, 3 and 1 and 3 are correct: '1. [text of option 1], 3. [text of option 3]'\n- If only one option is correct, provide just that one: 'B. [text of option B]'\n\nDO NOT include explanations, reasoning, or anything else. ONLY the correct option(s) in the exact format shown above, separated by commas if multiple.\nIf this is not an MCQ question, simply respond with 'Not an MCQ'";
+            } else {
+                // Single choice question - only one option can be selected
+                body.prompt += "\nIMPORTANT: This is a SINGLE CHOICE question where ONLY ONE option is correct. Analyze the question carefully and provide the single correct option.\n\nFormat your response EXACTLY like this:\n- If options are A, B, C: 'A. [text of option A]' or 'C. [text of option C]'\n- If options are 1, 2, 3: '1. [text of option 1]' or '3. [text of option 3]'\n\nDO NOT include explanations, reasoning, or anything else. ONLY the single correct answer in the exact format shown above.\nIf this is not an MCQ question, simply respond with 'Not an MCQ'";
+            }
+        }
+        console.log('[queryRequest] Sending request to API', API_URL, 'with body:', body);
+        try {
+            let response = await makeAuthenticatedRequest(API_URL, 'POST', accessToken, body);
+
+            // Server automatically handles token refresh if access token expired
+            // If auth fails, it means refresh token is also invalid/expired
+            if (!response.ok && (response.status === 401 || response.status === 403)) {
+                console.log('[queryRequest] Authentication failed - session expired');
+                chrome.storage.local.remove(['accessToken', 'refreshToken', 'loggedIn']);
+                return { 
+                    error: 'Session expired. Please log in again.', 
+                    errorType: 'auth',
+                    detailedInfo: 'Your session has expired. Please log in again to continue using NeoPass features.'
+                };
+            }
+
+            if (!response.ok) {
+                let errorMessage = 'An unexpected error occurred. Please try again.';
+                let errorType = 'general';
+                let detailedInfo = `Server responded with status ${response.status}`;
+                
+                try {
+                    const errorData = await response.json();
+                console.error("Error querying:", errorData);
+                
+                // Handle specific error types based on status code and response
+                if (response.status === 429) {
+                    errorType = 'rateLimit';
+                    if (errorData.error && errorData.error.includes('Token limit exceeded')) {
+                        errorMessage = 'Token limit exceeded. Please upgrade or wait for your limit to reset.';
+                        if (errorData.details) {
+                            detailedInfo = `You have used ${errorData.details.used} out of ${errorData.details.limit} tokens. ${errorData.details.remaining} tokens remaining.`;
+                        } else {
+                            detailedInfo = 'You have reached your token limit for this billing period.';
+                        }
+                    } else if (errorData.message && errorData.message.includes('Daily request limit exceeded')) {
+                        errorMessage = 'Daily request limit exceeded. Please try again tomorrow.';
+                        detailedInfo = `You have reached your daily request limit. ${errorData.nextReset ? `Limit resets at ${new Date(errorData.nextReset).toLocaleString()}` : 'Limit resets daily at midnight UTC.'}`;
+                    } else if (errorData.message && errorData.message.includes('wait for your previous request')) {
+                        errorMessage = 'Please wait for your previous request to complete.';
+                        detailedInfo = 'Multiple simultaneous requests are not allowed. Please wait a moment before trying again.';
+                    } else {
+                        errorMessage = 'Too many requests. Please wait before trying again.';
+                        detailedInfo = 'Rate limit exceeded. Please wait a few moments before making another request.';
+                    }
+                } else if (response.status === 403) {
+                    errorType = 'forbidden';
+                    
+                    // Check if this is a Pro subscription expiration
+                    if ((errorData.error && (errorData.error.includes('Pro subscription') || errorData.error.includes('active Pro subscription') || errorData.error.includes('subscription') || errorData.error.includes('expired'))) ||
+                        (errorData.message && (errorData.message.includes('subscription') || errorData.message.includes('expired')))) {
+                        errorMessage = 'Pro subscription required or expired.';
+                        detailedInfo = 'This service requires an active Pro subscription. Please upgrade or renew your Pro subscription.';
+                        
+                        // Auto-logout user when subscription expires
+                        chrome.storage.local.remove(['accessToken', 'refreshToken', 'loggedIn', 'username', 'isPro', 'loginTimestamp']);
+                        console.log('🔒 Auto-logout: Pro subscription expired');
+                    } else if (errorData.message && errorData.message.includes('star')) {
+                        errorMessage = 'Please star the repository to use this service.';
+                        detailedInfo = 'This service requires starring the GitHub repository. Please star it and try again.';
+                    } else {
+                        errorMessage = 'Access denied. Please check your account status.';
+                        detailedInfo = 'Your request was denied. This may be due to account restrictions or service limitations.';
+                    }
+                } else if (response.status === 500) {
+                    errorType = 'server';
+                    errorMessage = 'Service temporarily unavailable. Please try again in a moment.';
+                    detailedInfo = 'The server encountered an internal error. This is usually temporary and should resolve shortly.';
+                } else if (response.status === 400) {
+                    errorType = 'client';
+                    errorMessage = 'Invalid request. Please try rephrasing your question.';
+                    detailedInfo = 'The request format was invalid. Try shortening your text or rephrasing your question.';
+                } else {
+                    errorMessage = errorData.message || `Server error (${response.status})`;
+                    detailedInfo = errorData.error || `HTTP ${response.status}: ${errorMessage}`;
+                }
+                } catch (parseError) {
+                    console.error("Error parsing error response:", parseError);
+                    detailedInfo = `HTTP ${response.status}: Unable to parse error details`;
+                }
+                
+                return { error: errorMessage, errorType, detailedInfo };
+            }
+
+            const responseData = await response.json();
+            
+            // Server automatically refreshes access token if it expired
+            // Store the new access token (refresh token remains unchanged)
+            if (responseData.newAccessToken) {
+                await chrome.storage.local.set({ accessToken: responseData.newAccessToken });
+                console.log('✅ Access token auto-refreshed by server and stored');
+            }
+            
+            return responseData.text;
+        } catch (error) {
+            console.error("Error querying:", error);
+            let errorMessage = 'Network error. Please check your connection and try again.';
+            let errorType = 'network';
+            let detailedInfo = 'Failed to connect to the service. This could be due to network issues or service downtime.';
+            
+            if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                errorMessage = 'Unable to connect to the service. Please try again.';
+                detailedInfo = 'Network connection failed. Please check your internet connection and try again.';
+            } else if (error.message.includes('timeout')) {
+                errorMessage = 'Request timed out. Please try again.';
+                detailedInfo = 'The request took too long to complete. This may be due to high server load.';
+            } else {
+                detailedInfo = error.message || 'An unexpected error occurred during the request.';
+            }
+            
+            return { error: errorMessage, errorType, detailedInfo };
+        }
     } catch (error) {
         console.error("Error in queryRequest:", error);
         return { 
@@ -781,6 +1295,7 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
         unblockRequests();
     }
 }// Helper function to get custom API configuration
+
 // Function to retrieve custom AI API configs in priority order
 async function getCustomAPIConfigs() {
     return new Promise((resolve) => {
@@ -791,7 +1306,6 @@ async function getCustomAPIConfigs() {
             'customAPIKey',
             'customModelName'
         ], (result) => {
-            // Check for prioritized array of configs
             if (result.apiConfigs && Array.isArray(result.apiConfigs) && result.apiConfigs.length > 0) {
                 const validConfigs = result.apiConfigs
                     .filter(c => c && c.apiKey && String(c.apiKey).trim().length > 0)
@@ -807,7 +1321,6 @@ async function getCustomAPIConfigs() {
                 }
             }
 
-            // Legacy single-key fallback
             if (result.customAPIKey && String(result.customAPIKey).trim().length > 0) {
                 return resolve([{
                     aiProvider: result.aiProvider || 'google',
@@ -822,10 +1335,10 @@ async function getCustomAPIConfigs() {
     });
 }
 
-// Single-config backward compatibility helper
 async function getCustomAPIConfig() {
     const configs = await getCustomAPIConfigs();
-    return configs.length > 0 ? configs[0] : {
+    return configs.length > 0 ? { ...configs[0], useCustomAPI: true } : {
+        useCustomAPI: false,
         aiProvider: 'google',
         customEndpoint: '',
         apiKey: '',
@@ -833,23 +1346,22 @@ async function getCustomAPIConfig() {
     };
 }
 
-// Function to query custom AI API with token optimization & Multimodal Image Support
-async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []) {
+// Function to query custom AI API
+async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
     const { aiProvider, customEndpoint, apiKey, modelName } = config;
     
-    // Construct concise prompt to save tokens
-    let prompt = text.trim();
+    // Construct the prompt based on query type
+    let prompt = text;
     if (isMCQ) {
-        prompt = isMultipleChoice
-            ? `Multiple Choice Question. Multiple options may be correct.\nOutput ONLY correct option(s) in format "A. [text], C. [text]". No explanation.\n\n${prompt}`
-            : `Multiple Choice Question. Output ONLY the single correct option in format "A. [text]" or "1. [text]". No explanation.\n\n${prompt}`;
+        if (isMultipleChoice) {
+            prompt += "\nIMPORTANT: This is a MULTIPLE CHOICE question where MULTIPLE options can be correct. Analyze the question carefully and provide ALL correct options.\n\nFormat your response EXACTLY like this:\n- If options are A, B, C and A and C are correct: 'A. [text of option A], C. [text of option C]'\n- If options are 1, 2, 3 and 1 and 3 are correct: '1. [text of option 1], 3. [text of option 3]'\n- If only one option is correct, provide just that one: 'B. [text of option B]'\n\nDO NOT include explanations, reasoning, or anything else. ONLY the correct option(s) in the exact format shown above, separated by commas if multiple.\nIf this is not an MCQ question, simply respond with 'Not an MCQ'";
+        } else {
+            prompt += "\nIMPORTANT: This is a SINGLE CHOICE question where ONLY ONE option is correct. Analyze the question carefully and provide the single correct option.\n\nFormat your response EXACTLY like this:\n- If options are A, B, C: 'A. [text of option A]' or 'C. [text of option C]'\n- If options are 1, 2, 3: '1. [text of option 1]' or '3. [text of option 3]'\n\nDO NOT include explanations, reasoning, or anything else. ONLY the single correct answer in the exact format shown above.\nIf this is not an MCQ question, simply respond with 'Not an MCQ'";
+        }
     }
-    
-    const hasImages = (images && Array.isArray(images) && images.length > 0);
     
     try {
         let apiUrl, requestBody, headers;
-        const maxTokens = isMCQ ? 80 : 2048;
         
         // Configure API call based on provider
         switch (aiProvider) {
@@ -859,21 +1371,10 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`
                 };
-                let openAiMessages;
-                if (hasImages) {
-                    const content = [{ type: 'text', text: prompt }];
-                    images.forEach(img => {
-                        if (img) content.push({ type: 'image_url', image_url: { url: img } });
-                    });
-                    openAiMessages = [{ role: 'user', content: content }];
-                } else {
-                    openAiMessages = [{ role: 'user', content: prompt }];
-                }
                 requestBody = {
                     model: modelName || 'gpt-4o-mini',
-                    messages: openAiMessages,
-                    max_tokens: maxTokens,
-                    temperature: 0.1
+                    messages: [{ role: 'user', content: prompt }],
+                    temperature: 1
                 };
                 break;
                 
@@ -884,98 +1385,23 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []
                     'x-api-key': apiKey,
                     'anthropic-version': '2023-06-01'
                 };
-                let anthropicMessages;
-                if (hasImages) {
-                    const content = [];
-                    images.forEach(img => {
-                        const m = img && img.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-                        if (m) {
-                            content.push({
-                                type: 'image',
-                                source: { type: 'base64', media_type: m[1], data: m[2] }
-                            });
-                        }
-                    });
-                    content.push({ type: 'text', text: prompt });
-                    anthropicMessages = [{ role: 'user', content: content }];
-                } else {
-                    anthropicMessages = [{ role: 'user', content: prompt }];
-                }
                 requestBody = {
                     model: modelName || 'claude-3-5-sonnet-20241022',
-                    max_tokens: maxTokens,
-                    temperature: 0.1,
-                    messages: anthropicMessages
+                    max_tokens: 4096,
+                    messages: [{ role: 'user', content: prompt }]
                 };
                 break;
                 
             case 'google':
-                const googleModels = [
-                    modelName,
-                    'gemini-3.5-flash',
-                    'gemini-2.5-flash',
-                    'gemini-2.0-flash',
-                    'gemini-1.5-flash',
-                    'gemini-1.5-pro'
-                ].filter(Boolean);
-                const uniqueGoogleModels = [...new Set(googleModels)];
-                
-                const googleParts = [{ text: prompt }];
-                if (hasImages) {
-                    images.forEach(img => {
-                        const m = img && img.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/);
-                        if (m) {
-                            googleParts.push({
-                                inline_data: {
-                                    mime_type: m[1],
-                                    data: m[2]
-                                }
-                            });
-                        }
-                    });
-                }
-                
-                let lastGoogleError = null;
-                for (const gModel of uniqueGoogleModels) {
-                    try {
-                        const gUrl = `https://generativelanguage.googleapis.com/v1beta/models/${gModel}:generateContent?key=${apiKey}`;
-                        const gRes = await fetch(gUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                contents: [{ parts: googleParts }],
-                                generationConfig: {
-                                    maxOutputTokens: maxTokens,
-                                    temperature: 0.1
-                                }
-                            })
-                        });
-
-                        if (gRes.ok) {
-                            const gData = await gRes.json();
-                            const txt = gData.candidates?.[0]?.content?.parts?.[0]?.text;
-                            if (txt) return txt;
-                        }
-
-                        const errData = await gRes.json().catch(() => ({}));
-                        lastGoogleError = {
-                            error: `API request failed: ${gRes.status}`,
-                            errorType: 'api',
-                            detailedInfo: errData.error?.message || errData.message || `HTTP ${gRes.status}: ${gRes.statusText}`
-                        };
-
-                        if ([503, 429, 404, 500].includes(gRes.status)) {
-                            console.warn(`[Gemini Auto-Fallback] ${gModel} returned HTTP ${gRes.status}. Cascading to next model...`);
-                            await new Promise(resolve => setTimeout(resolve, 300));
-                            continue;
-                        } else {
-                            return lastGoogleError;
-                        }
-                    } catch (gErr) {
-                        lastGoogleError = { error: 'Network error', errorType: 'network', detailedInfo: gErr.message };
-                    }
-                }
-                return lastGoogleError || { error: 'All Gemini models failed', errorType: 'api' };
+                const googleModel = modelName || 'gemini-2.5-flash';
+                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${googleModel}:generateContent?key=${apiKey}`;
+                headers = {
+                    'Content-Type': 'application/json'
+                };
+                requestBody = {
+                    contents: [{ parts: [{ text: prompt }] }]
+                };
+                break;
                 
             case 'deepseek':
                 apiUrl = 'https://api.deepseek.com/v1/chat/completions';
@@ -986,8 +1412,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []
                 requestBody = {
                     model: modelName || 'deepseek-chat',
                     messages: [{ role: 'user', content: prompt }],
-                    max_tokens: maxTokens,
-                    temperature: 0.1
+                    temperature: 0.7
                 };
                 break;
                 
@@ -1006,9 +1431,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []
                 };
                 requestBody = {
                     model: modelName || 'default',
-                    messages: [{ role: 'user', content: prompt }],
-                    max_tokens: maxTokens,
-                    temperature: 0.1
+                    messages: [{ role: 'user', content: prompt }]
                 };
                 break;
                 
@@ -1082,7 +1505,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, images = []
 }
 
 
-const API_BASE_URL = 'https://api.neopass.tech';
+const API_BASE_URL = 'https://api.neopass.site';
 // Listen for messages from Chrome runtime for ChatBot
 // Helper function to get tokens from chrome storage
 async function getTokens() {
@@ -1186,7 +1609,7 @@ ${request.question}
 
 Respond with ONLY the ${request.programmingLanguage} code:`;
                     } else {
-                        // Original legacy prompt for highest C language accuracy
+                        // Original prompt for other platforms
                         queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
                             Ensure the code: Meets the requirements outlined in the problem statement.
                             Stricly Passes all test cases, including edge cases and boundary conditions.
@@ -1212,17 +1635,9 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     type: request.isCoding ? 'Coding Question' : 'MCQ',
                     prompt: queryText,
                     length: queryText.length
-                });
-
-                // Show small progress toast while waiting
-                showProgressToast(sender.tab.id);
-
-                // Send query and handle response
-                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id, request.images || []);
+                });                // Send query and handle response
+                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id);
                 
-                // Dismiss the progress toast now that we have a response
-                hideProgressToast(sender.tab.id);
-
                 // Check if response is successful (string) or contains error
                 if (response && typeof response === 'string') {
                     // Success case
@@ -1262,9 +1677,6 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
             } catch (error) {
                 console.error("Query processing error:", error);
                 
-                // Dismiss the progress toast on error too
-                hideProgressToast(sender.tab.id);
-                
                 // Show a generic error toast only if the error wasn't already handled by queryRequest
                 showToast(sender.tab.id, 'An unexpected error occurred. Please try again.', true, 'The request failed due to an unexpected error. This may be temporary.');
                 
@@ -1283,32 +1695,207 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
 async function handleChatMessage(message, sender) {
     try {
         // Check if user has custom API configured
-        const customAPIConfigs = await getCustomAPIConfigs();
+        const customAPIConfig = await getCustomAPIConfig();
         
-        if (customAPIConfigs.length > 0) {
+        if (customAPIConfig.useCustomAPI && customAPIConfig.apiKey) {
             // Use custom API for chat
             const chatPrompt = message.context 
                 ? `Context: ${message.context}\n\nUser: ${message.message}\n\nPlease provide a helpful response.`
                 : message.message;
                 
-            let lastResult = null;
-            for (const config of customAPIConfigs) {
-                const result = await queryCustomAPI(chatPrompt, false, false, config);
-                if (typeof result === 'string') {
-                    sendChatResponse(sender.tab.id, result);
-                    return;
-                }
-                lastResult = result;
-            }
+            const result = await queryCustomAPI(chatPrompt, false, false, customAPIConfig);
             
-            sendChatErrorResponse(sender.tab.id, lastResult?.error || 'All API keys failed');
+            if (typeof result === 'string') {
+                sendChatResponse(sender.tab.id, result);
+            } else {
+                sendChatErrorResponse(sender.tab.id, result.error || 'Failed to get response from custom API');
+            }
             return;
         }
         
-        sendChatErrorResponse(sender.tab.id, "Please configure your AI API key in the extension Settings tab to use the chatbot.");
+        // Check if user is logged in
+        const {
+            accessToken,
+            refreshToken,
+            isPro
+        } = await getTokens();
+
+        // If not logged in and no custom API configured, require custom API
+        if (!accessToken || !refreshToken) {
+            sendChatErrorResponse(sender.tab.id, "Please configure your custom API key in Settings or login with Pro to use our proxy-server.");
+            return;
+        }
+
+        // Always use Pro endpoint
+        const chatEndpoint = `${API_BASE_URL}/api/pro-chat`;
+
+        const requestBody = {
+            message: message.message,
+            context: message.context,
+            refreshToken: refreshToken  // Send refresh token for server-side auto-refresh
+        };
+
+        // Include image if present
+        if (message.image) {
+            requestBody.image = message.image;
+        }
+
+        let response = await makeAuthenticatedRequest(
+            chatEndpoint,
+            "POST",
+            accessToken,
+            requestBody,
+            {
+                'X-Neo-Response-Format': 'text-stream'
+            }
+        );
+
+        // Server automatically handles token refresh if access token expired
+        // If auth fails, it means refresh token is also invalid/expired
+        if (!response.ok && (response.status === 401 || response.status === 403)) {
+            // Check if this is an auth error vs Pro subscription error
+            try {
+                const errorData = await response.json();
+                if (errorData.message && errorData.message.includes('subscription')) {
+                    // This is a Pro subscription issue, not an auth issue
+                    sendChatErrorResponse(sender.tab.id, "Your Pro subscription is required or has expired. Please upgrade or renew.");
+                    return;
+                }
+            } catch (e) {
+                // Couldn't parse error, assume auth failure
+            }
+            
+            // Authentication failed - clear tokens
+            chrome.storage.local.remove(['accessToken', 'refreshToken', 'loggedIn']);
+            sendChatErrorResponse(sender.tab.id, "Session expired. Please log in again.");
+            return;
+        }
+
+        // Handle different error scenarios with specific user messages
+        if (!response.ok) {
+            let errorMessage = "Sorry, I encountered an error processing your message.";
+            
+            try {
+                const errorData = await response.json();
+                
+                if (response.status === 429) {
+                    if (errorData.error && errorData.error.includes('Token limit exceeded')) {
+                        errorMessage = "Token limit exceeded. Please upgrade or wait for your limit to reset.";
+                        if (errorData.details) {
+                            errorMessage += ` (Used: ${errorData.details.used}/${errorData.details.limit})`;
+                        }
+                    } else if (errorData.message && errorData.message.includes('Daily request limit exceeded')) {
+                        errorMessage = "You've reached your daily chat limit. Please try again tomorrow.";
+                    } else if (errorData.message && errorData.message.includes('wait for your previous request')) {
+                        errorMessage = "Please wait for your previous message to be processed before sending another.";
+                    } else {
+                        errorMessage = "Too many requests. Please wait a moment before trying again.";
+                    }
+                } else if (response.status === 403) {
+                    // Check if this is a Pro subscription expiration
+                    if ((errorData.error && (errorData.error.includes('Pro subscription') || errorData.error.includes('active Pro subscription') || errorData.error.includes('subscription') || errorData.error.includes('expired'))) ||
+                        (errorData.message && (errorData.message.includes('subscription') || errorData.message.includes('expired')))) {
+                        errorMessage = "Your Pro subscription is required or has expired. Please upgrade or renew your Pro subscription to continue using this service.";
+                        
+                        // Auto-logout user when subscription expires
+                        chrome.storage.local.remove(['accessToken', 'refreshToken', 'loggedIn', 'username', 'isPro', 'loginTimestamp']);
+                        console.log('🔒 Auto-logout: Pro subscription expired');
+                    } else if (errorData.message && errorData.message.includes('star')) {
+                        errorMessage = "Please star the repository to use the chat feature.";
+                    } else {
+                        errorMessage = "Access denied. Please check your account status or try logging in again.";
+                    }
+                } else if (response.status === 500) {
+                    errorMessage = "The chat service is temporarily unavailable. Please try again in a moment.";
+                } else if (response.status === 400) {
+                    errorMessage = "Your message couldn't be processed. Try rephrasing or shortening it.";
+                } else {
+                    errorMessage = errorData.message || `Service error (${response.status}). Please try again.`;
+                }
+            } catch (parseError) {
+                console.error("Error parsing chat error response:", parseError);
+                errorMessage = `Chat service error (${response.status}). Please try again later.`;
+            }
+            
+            // Send error message with proper error role
+            sendChatErrorResponse(sender.tab.id, errorMessage);
+            return;
+        }
+
+        // Check for new access token issued by the server during this request
+        const newAccessToken = response.headers.get('X-New-Access-Token');
+        if (newAccessToken) {
+            await chrome.storage.local.set({ accessToken: newAccessToken });
+            console.log('✅ Access token auto-refreshed during chat request and stored');
+        }
+
+        const responseContentType = (response.headers.get('content-type') || '').toLowerCase();
+
+        if (responseContentType.includes('application/json')) {
+            const data = await response.json();
+            const content = typeof data?.content === 'string' ? data.content : '';
+
+            if (content) {
+                sendChatResponse(sender.tab.id, content);
+            } else {
+                sendChatErrorResponse(sender.tab.id, 'No response received. Please try again.');
+            }
+            return;
+        }
+
+        // Read the plain-text stream produced by pipeTextStreamToResponse.
+        // The server sends raw text deltas; each read() call yields one or more
+        // text chunks that are concatenated directly into the response.
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulatedText = '';
+        let receivedChunks = false;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            if (chunk) {
+                accumulatedText += chunk;
+                receivedChunks = true;
+                // Send incremental streaming update to the chatbot UI
+                chrome.tabs.sendMessage(sender.tab.id, {
+                    action: "updateChatHistory",
+                    role: "assistant",
+                    content: accumulatedText,
+                    isStreaming: true
+                });
+            }
+        }
+
+        // Flush any bytes remaining in the decoder after the stream closes
+        const finalChunk = decoder.decode();
+        if (finalChunk) {
+            accumulatedText += finalChunk;
+            receivedChunks = true;
+        }
+
+        // Finalise: send full accumulated text (isStreaming unset → chatbot.js closes the streaming div)
+        if (receivedChunks) {
+            sendChatResponse(sender.tab.id, accumulatedText);
+        } else {
+            sendChatErrorResponse(sender.tab.id, "No response received. Please try again.");
+        }
     } catch (error) {
         console.error("Chat processing error:", error);
-        sendChatErrorResponse(sender.tab.id, "Sorry, an error occurred while processing your message: " + (error.message || error));
+        
+        let errorMessage = "Sorry, I encountered an error processing your message.";
+        
+        if (error.name === 'TypeError' && error.message.includes('fetch')) {
+            errorMessage = "Unable to connect to the chat service. Please check your connection and try again.";
+        } else if (error.message.includes('timeout')) {
+            errorMessage = "The request timed out. Please try again.";
+        } else {
+            errorMessage = "Sorry, I encountered an unexpected error. Please try again or log in again if the issue persists.";
+        }
+        
+        sendChatErrorResponse(sender.tab.id, errorMessage);
     }
 }
 
@@ -1422,79 +2009,14 @@ let currentOpacityLevel = "high";
 let activeToastId = null;
 
 // Function to remove any existing toast
-// Small transparent progress toast — shown while AI query is in flight
-async function showProgressToast(tabId) {
-    const opacity = await getToastOpacity();
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        func: function(opacity) {
-            // Remove any existing progress toast
-            var old = document.getElementById('neoexamshield-progress-toast');
-            if (old) old.remove();
-
-            var t = document.createElement('div');
-            t.id = 'neoexamshield-progress-toast';
-            t.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:999999;' +
-                'background:rgba(20,20,25,0.75);color:#e0e0e0;' +
-                'padding:8px 14px;border-radius:20px;font-size:13px;' +
-                'font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;' +
-                'display:flex;align-items:center;gap:8px;' +
-                'backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);' +
-                'border:1px solid rgba(255,255,255,0.08);' +
-                'box-shadow:0 2px 8px rgba(0,0,0,0.25);' +
-                'opacity:' + opacity + ';transition:opacity 0.3s ease;' +
-                'pointer-events:none;';
-
-            // Spinning dot
-            var dot = document.createElement('span');
-            dot.style.cssText = 'width:8px;height:8px;border-radius:50%;' +
-                'border:2px solid rgba(255,255,255,0.2);border-top-color:#a78bfa;' +
-                'animation:_nes_spin 0.6s linear infinite;display:inline-block;flex-shrink:0;';
-
-            // Keyframes (inject once)
-            if (!document.getElementById('_nes_spin_style')) {
-                var s = document.createElement('style');
-                s.id = '_nes_spin_style';
-                s.textContent = '@keyframes _nes_spin{to{transform:rotate(360deg)}}';
-                document.head.appendChild(s);
-            }
-
-            var label = document.createElement('span');
-            label.textContent = 'Thinking…';
-
-            t.appendChild(dot);
-            t.appendChild(label);
-            document.body.appendChild(t);
-        },
-        args: [opacity],
-        world: 'MAIN'
-    }).catch(function() {});
-}
-
-function hideProgressToast(tabId) {
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        func: function() {
-            var t = document.getElementById('neoexamshield-progress-toast');
-            if (t) {
-                t.style.opacity = '0';
-                setTimeout(function() { if (t.parentNode) t.remove(); }, 300);
-            }
-        },
-        world: 'MAIN'
-    }).catch(function() {});
-}
-
 function removeExistingToast(tabId) {
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: function() {
             // Remove all possible toast types
             const toastSelectors = [
-                '#neoexamshield-active-toast',
                 '#neopass-active-toast',
                 '#stealth-mode-toast',
-                '.neoexamshield-update-toast',
                 '.neopass-update-toast',
                 '[id*="toast"]',
                 '[class*="toast"]'
@@ -1577,7 +2099,7 @@ function showOpacityLevelToast(tabId, message) {
         func: function(msg, opacityLevel) {
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast'; // Add ID for tracking
             toast.style.position = 'fixed';
             toast.style.bottom = '20px';
             toast.style.left = '50%';
@@ -1747,7 +2269,7 @@ async function showToast(tabId, message, isError = false, detailedInfo = '') {
         func: function(msg, isError, opacity, detailedInfo) {
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast'; // Add ID for tracking
             toast.style.position = 'fixed';
             toast.style.bottom = '20px';
             toast.style.left = '50%';
@@ -1952,7 +2474,7 @@ async function showStealthToast(tabId, message, stealthEnabled) {
         func: function(msg, stealthEnabled, opacity) {
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-active-toast'; // Use same ID for tracking
+            toast.id = 'neopass-active-toast'; // Use same ID for tracking
             
             // Set colors based on stealth mode state
             const textColor = stealthEnabled ? '#4ade80' : '#ff6b6b';
@@ -2472,7 +2994,7 @@ async function showMCQToast(tabId, message, detailedInfo = '') {
             
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast'; // Add ID for tracking
             toast.style.position = 'fixed';
             toast.style.bottom = '20px';
             toast.style.left = '50%';
@@ -2717,7 +3239,7 @@ async function showNPTELToast(tabId, message, isError = false, detailedInfo = ''
         func: function(msg, isError, opacity, detailedInfo) {
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast'; // Add ID for tracking
             toast.style.position = 'fixed';
             toast.style.bottom = '20px';
             toast.style.left = '50%';
@@ -2921,7 +3443,7 @@ async function showSpinnerToast(tabId, message = 'Processing your request...') {
         func: function(msg, opacity) {
             // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neoexamshield-spinner-toast';
+            toast.id = 'neopass-spinner-toast';
             toast.style.position = 'fixed';
             toast.style.bottom = '20px';
             toast.style.left = '50%';

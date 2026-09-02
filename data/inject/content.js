@@ -128,7 +128,7 @@ window.isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
     });
 })();
 
-// Function to convert HTML to readable text with proper formatting and minimal token footprint
+// Function to convert HTML to readable text with proper formatting
 function htmlToText(element) {
     if (!element) return '';
     
@@ -150,55 +150,8 @@ function htmlToText(element) {
         br.replaceWith('\n');
     });
     
-    // Get the text content, collapse redundant whitespace and consecutive blank lines
-    return clone.innerText
-        .replace(/[ \t]+/g, ' ')
-        .replace(/\n\s*\n/g, '\n')
-        .trim();
-}
-
-// Helper to extract all diagrams/images in question containers as base64 data URLs
-async function extractImagesFromElement(container) {
-    if (!container) return [];
-    const imgs = container.querySelectorAll('img');
-    const images = [];
-
-    for (const img of imgs) {
-        // Filter out tiny icons, decorative curve SVGs, UI indicators (< 25px)
-        const isIcon = (img.width > 0 && img.width < 25) || 
-                       (img.height > 0 && img.height < 25) ||
-                       (img.src && (img.src.includes('clock.svg') || img.src.includes('test_curve.svg')));
-        
-        if (isIcon) continue;
-
-        try {
-            if (img.src && img.src.startsWith('data:image/')) {
-                images.push(img.src);
-            } else if (img.src) {
-                if (img.complete && img.naturalWidth > 20) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.naturalWidth;
-                    canvas.height = img.naturalHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                    images.push(canvas.toDataURL('image/jpeg', 0.85));
-                } else {
-                    const res = await fetch(img.src);
-                    const blob = await res.blob();
-                    const b64 = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = () => resolve(null);
-                        reader.readAsDataURL(blob);
-                    });
-                    if (b64) images.push(b64);
-                }
-            }
-        } catch (e) {
-            console.warn('[Image Extraction] Skipping non-convertible image:', e);
-        }
-    }
-    return images;
+    // Get the text content
+    return clone.innerText.trim();
 }
 
 // Function to extract the question, code, and options
@@ -217,24 +170,17 @@ function extractQuestionCodeAndOptions() {
 
     const codeText = codeLines.length > 0 ? codeLines.join('\n') : null; // Set to null if no code is found
 
-    // Extracting options (with image support)
-    const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]');
+    // Extracting options
+    const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]'); // Update this selector as necessary
     const optionsText = [];
     optionsElements.forEach((option, index) => {
-        let optText = htmlToText(option);
-        const optImg = option.querySelector('img');
-        if (optImg && optImg.alt && !optText.includes(optImg.alt)) {
-            optText += ` [Image: ${optImg.alt}]`;
-        } else if (optImg && !optText) {
-            optText = `[Option ${index + 1} Diagram]`;
-        }
-        optionsText.push(`Option ${index + 1}: ${optText}`);
+        optionsText.push(`Option ${index + 1}: ${htmlToText(option)}`);
     });
 
     return {
         question: questionText,
-        code: codeText,
-        options: optionsText.join('\n')
+        code: codeText, // This can be null if no code is present
+        options: optionsText.join('\n') // Join options with new line characters
     };
 }
 
@@ -242,53 +188,40 @@ function extractQuestionCodeAndOptions() {
 async function handleQuestionExtraction() {
     const { question, code, options } = extractQuestionCodeAndOptions();
 
-    if (!question && !options) {
+    if (!question) {
         return;
     }
 
-    // Extract all diagrams and images from the entire question and options area
-    const questionContainer = document.querySelector('div[aria-labelledby="question-answer"]') || 
-                              document.querySelector('testtaking-question') || 
-                              document.querySelector('div[aria-labelledby="question-data"]') || 
-                              document.body;
+    console.log('Question:', question);
+    console.log('Code:\n', code ? code : 'No code available');
+    console.log('Options:\n', options);
 
-    const images = await extractImagesFromElement(questionContainer);
-
-    console.log('[MCQ] Question text extracted length:', question.length);
-    console.log('[MCQ] Options extracted length:', options.length);
-    console.log('[MCQ] Diagrams/Images extracted:', images.length);
-
-    // Send the extracted text and images to background.js
+    // Send the extracted data to background.js
+    // The clicking will be handled by the clickMCQOption message handler
     chrome.runtime.sendMessage({
         action: 'extractData',
         question: question,
         code: code,
         options: options,
-        images: images,
         isMCQ: true
     });
 }
 
 // Function to extract coding question details
-async function extractCodingQuestion(isTyped = false) {
-    // Extract programming language and normalize (e.g. "C (17)" -> "C", "Java (openjdk 13.0.1)" -> "Java")
+function extractCodingQuestion(isTyped = false) {
+    // Extract programming language
     const programmingLanguageElement = document.querySelector('span.inner-text');
-    let rawLang = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'C';
-    const programmingLanguage = rawLang.replace(/\s*\([^)]*\)/g, '').trim();
+    const programmingLanguage = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'Programming language not found.';
 
     // Extract question components
     const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
     const questionText = questionElement ? htmlToText(questionElement) : 'Question not found.';
-    const images = await extractImagesFromElement(questionElement);
 
     const inputFormatElement = document.querySelector('div[aria-labelledby="input-format"]');
     const inputFormatText = inputFormatElement ? htmlToText(inputFormatElement) : '';
 
     const outputFormatElement = document.querySelector('div[aria-labelledby="output-format"]');
     const outputFormatText = outputFormatElement ? htmlToText(outputFormatElement) : '';
-
-    const constraintsElement = document.querySelector('div[aria-labelledby="code-constraints"]');
-    const constraintsText = constraintsElement ? htmlToText(constraintsElement) : '';
 
     // Extract sample test cases with robust fallback method
     const testCases = [];
@@ -299,8 +232,8 @@ async function extractCodingQuestion(isTyped = false) {
     if (containers.length > 0) {
         console.log('[Test Cases] Method 1: Found', containers.length, 'test case containers');
         containers.forEach((container) => {
-            const inputPre = container.querySelector('div[aria-labelledby="each-tc-input-container"] pre, [class*="each-tc-input"] pre, pre[aria-labelledby="each-tc-input"]');
-            const outputPre = container.querySelector('div[aria-labelledby="each-tc-output-container"] pre, div[arai-label="each-tc-output-container"] pre, [class*="each-tc-output"] pre, pre[aria-labelledby="each-tc-output"]');
+            const inputPre = container.querySelector('div[aria-labelledby="each-tc-input-container"] pre');
+            const outputPre = container.querySelector('div[aria-labelledby="each-tc-output-container"] pre');
             
             if (inputPre && outputPre) {
                 testCases.push({
@@ -416,12 +349,10 @@ async function extractCodingQuestion(isTyped = false) {
         question: questionText,
         inputFormat: inputFormatText,
         outputFormat: outputFormatText,
-        constraints: constraintsText,
         testCases: testCasesText,
         headerSnippet: headerSnippet,
         footerSnippet: footerSnippet,
         whitelist: whitelistText,
-        images: images,
         isCoding: true,
         isTyped: isTyped
     }, (response) => {
@@ -799,19 +730,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
             } else {
                 // Original logic for other platforms (Examly)
-                const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
+                const optionMatch = request.response.match(/(?:options?\s*)?(\d+)\.?/i);
                 if (optionMatch) {
-                    let optionNumber;
-                    if (isNaN(optionMatch[1])) {
-                        optionNumber = optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
-                    } else {
-                        optionNumber = parseInt(optionMatch[1]) - 1;
-                    }
+                    const optionNumber = parseInt(optionMatch[1])-1;
                     // Use the same selector as the primary Iamneo answer flow.
-                    const answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`) || document.querySelector(`#tt-option-${optionNumber} input[type="radio"]`);
+                    const answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`);
                     
                     if (answerElement) {
-                        answerElement.click();
+                        answerElement.dispatchEvent(new Event("click", { bubbles: true }));
                         console.log(`Option element ${optionNumber + 1} clicked successfully`);
                     } else {
                         chrome.runtime.sendMessage({
