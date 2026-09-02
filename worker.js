@@ -723,13 +723,21 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
     blockRequests();
     
     try {
-        // Check if user has custom API configured
-        const customAPIConfig = await getCustomAPIConfig();
+        const customAPIConfigs = await getCustomAPIConfigs();
         
-        if (customAPIConfig.useCustomAPI && customAPIConfig.apiKey) {
-            const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, customAPIConfig);
+        if (customAPIConfigs.length > 0) {
+            let lastResult = null;
+            for (const config of customAPIConfigs) {
+                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config);
+                if (typeof result === 'string') {
+                    unblockRequests();
+                    return result; // Success
+                }
+                console.warn("API Key failed, falling back to next...", result);
+                lastResult = result;
+            }
             unblockRequests();
-            return result;
+            return lastResult; // Return the last error if all failed
         }
         
         // Check if user is logged in
@@ -1002,8 +1010,8 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                 break;
                 
             case 'google':
-                const googleModel = modelName || 'gemini-2.5-flash';
-                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${googleModel}:generateContent?key=${apiKey}`;
+                const googleModel = modelName || 'gemini-1.5-flash';
+                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel.trim())}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
                 headers = {
                     'Content-Type': 'application/json'
                 };
@@ -1303,23 +1311,21 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
 
 async function handleChatMessage(message, sender) {
     try {
-        // Check if user has custom API configured
-        const customAPIConfig = await getCustomAPIConfig();
+        const customAPIConfigs = await getCustomAPIConfigs();
         
-        if (customAPIConfig.useCustomAPI && customAPIConfig.apiKey) {
-            // Use custom API for chat
-            const chatPrompt = message.context 
-                ? `Context: ${message.context}\n\nUser: ${message.message}\n\nPlease provide a helpful response.`
-                : message.message;
-                
-            const result = await queryCustomAPI(chatPrompt, false, false, customAPIConfig);
-            
-            if (typeof result === 'string') {
-                sendChatResponse(sender.tab.id, result);
-            } else {
-                sendChatErrorResponse(sender.tab.id, result.error || 'Failed to get response from custom API');
+        if (customAPIConfigs.length > 0) {
+            let lastResult = null;
+            for (const config of customAPIConfigs) {
+                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config);
+                if (typeof result === 'string') {
+                    unblockRequests();
+                    return result; // Success
+                }
+                console.warn("API Key failed, falling back to next...", result);
+                lastResult = result;
             }
-            return;
+            unblockRequests();
+            return lastResult; // Return the last error if all failed
         }
         
         // Check if user is logged in
