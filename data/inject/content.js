@@ -154,8 +154,39 @@ function htmlToText(element) {
     return clone.innerText.trim();
 }
 
-// Helper to extract all diagrams/images in question containers as base64 data URLs
-async function extractImagesFromElement(container) {
+// Robust multi-selector helpers for question and option containers
+function findQuestionElement() {
+    return document.querySelector('div[aria-labelledby="question-data"]') ||
+           document.querySelector('testtaking-question .ql-editor') ||
+           document.querySelector('div.ql-editor') ||
+           document.querySelector('[aria-labelledby="question-answer"] .ql-editor') ||
+           document.querySelector('[aria-labelledby="question-answer"]') ||
+           document.querySelector('.question-view') ||
+           document.querySelector('.grouped-mcq__question');
+}
+
+function findOptionElements() {
+    // Check 1: aria-labelledby="each-option"
+    let opts = document.querySelectorAll('div[aria-labelledby="each-option"]');
+    if (opts && opts.length > 0) return Array.from(opts);
+
+    // Check 2: tt-option-* elements
+    opts = document.querySelectorAll('[id^="tt-option-"]');
+    if (opts && opts.length > 0) return Array.from(opts);
+
+    // Check 3: each-option-card / each-option container
+    opts = document.querySelectorAll('[aria-labelledby="each-option-card"], [aria-labelledby="each-option-container"], .each-option');
+    if (opts && opts.length > 0) return Array.from(opts);
+
+    // Check 4: testtaking-options or radio/checkbox groups
+    opts = document.querySelectorAll('testtaking-options .t-flex.t-flex-row, .grouped-mcq__options label, [role="radiogroup"] [role="radio"]');
+    if (opts && opts.length > 0) return Array.from(opts);
+
+    return [];
+}
+
+// Helper to extract diagrams/images synchronously without hanging on cross-origin fetches
+function extractImagesFromElement(container) {
     if (!container) return [];
     const imgs = container.querySelectorAll('img');
     const images = [];
@@ -164,35 +195,41 @@ async function extractImagesFromElement(container) {
         // Filter out tiny icons, decorative curve SVGs, UI indicators (< 25px)
         const isIcon = (img.width > 0 && img.width < 25) || 
                        (img.height > 0 && img.height < 25) ||
-                       (img.src && (img.src.includes('clock.svg') || img.src.includes('test_curve.svg')));
+                       (img.src && (
+                           img.src.includes('clock.svg') || 
+                           img.src.includes('test_curve.svg') ||
+                           img.src.includes('next.svg') ||
+                           img.src.includes('arrow_down.svg') ||
+                           img.src.includes('pattern.png') ||
+                           img.src.includes('user-pic')
+                       ));
         
         if (isIcon) continue;
 
-        try {
-            if (img.src && img.src.startsWith('data:image/')) {
+        if (img.src) {
+            if (img.src.startsWith('data:image/')) {
                 images.push(img.src);
-            } else if (img.src) {
-                if (img.complete && img.naturalWidth > 20) {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.naturalWidth;
-                    canvas.height = img.naturalHeight;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
-                    images.push(canvas.toDataURL('image/jpeg', 0.85));
-                } else {
-                    const res = await fetch(img.src);
-                    const blob = await res.blob();
-                    const b64 = await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => resolve(reader.result);
-                        reader.onerror = () => resolve(null);
-                        reader.readAsDataURL(blob);
-                    });
-                    if (b64) images.push(b64);
+            } else if (img.src.startsWith('http://') || img.src.startsWith('https://')) {
+                let exported = false;
+                try {
+                    if (img.complete && img.naturalWidth > 20) {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.naturalWidth;
+                        canvas.height = img.naturalHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        images.push(canvas.toDataURL('image/jpeg', 0.85));
+                        exported = true;
+                    }
+                } catch (e) {
+                    // Tainted canvas on cross-origin images (expected)
+                }
+                // If canvas cannot export due to CORS, pass the full URL.
+                // worker.js has host_permissions (*://*/*) and will fetch/convert to base64 seamlessly.
+                if (!exported) {
+                    images.push(img.src);
                 }
             }
-        } catch (e) {
-            console.warn('[Image Extraction] Skipping non-convertible image:', e);
         }
     }
 
@@ -202,7 +239,7 @@ async function extractImagesFromElement(container) {
 // Function to extract the question, code, and options
 function extractQuestionCodeAndOptions() {
     // Extracting the question text
-    const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
+    const questionElement = findQuestionElement();
     const questionText = questionElement ? htmlToText(questionElement) : '';
 
     // Extracting the code
@@ -213,10 +250,10 @@ function extractQuestionCodeAndOptions() {
         codeLines.push(line.innerText.trim());
     });
 
-    const codeText = codeLines.length > 0 ? codeLines.join('\n') : null; // Set to null if no code is found
+    const codeText = codeLines.length > 0 ? codeLines.join('\n') : null;
 
     // Extracting options
-    const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]'); // Update this selector as necessary
+    const optionsElements = findOptionElements();
     const optionsText = [];
     optionsElements.forEach((option, index) => {
         optionsText.push(`Option ${index + 1}: ${htmlToText(option)}`);
@@ -224,15 +261,17 @@ function extractQuestionCodeAndOptions() {
 
     return {
         question: questionText,
-        code: codeText, // This can be null if no code is present
-        options: optionsText.join('\n') // Join options with new line characters
+        code: codeText,
+        options: optionsText.join('\n')
     };
 }
 
-// Async function to handle question, code, and options extraction with full image & diagram support
+// Function to handle question, code, and options extraction with full image & diagram support
 async function handleQuestionExtraction() {
+    console.log('[MCQ] Starting question extraction...');
+
     // 1. Extract question text
-    const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
+    const questionElement = findQuestionElement();
     const questionText = questionElement ? htmlToText(questionElement) : '';
 
     // 2. Extract code
@@ -244,10 +283,10 @@ async function handleQuestionExtraction() {
     // 3. Extract question diagrams first
     const allImages = [];
     let imageCounter = 1;
-    let visualGuide = [];
+    const visualGuide = [];
 
     if (questionElement) {
-        const qImages = await extractImagesFromElement(questionElement);
+        const qImages = extractImagesFromElement(questionElement);
         for (const img of qImages) {
             allImages.push(img);
             visualGuide.push(`[Image ${imageCounter++}: Question diagram]`);
@@ -255,13 +294,15 @@ async function handleQuestionExtraction() {
     }
 
     // 4. Extract options and option images specifically
-    const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]');
+    const optionsElements = findOptionElements();
     const optionsText = [];
+    const rawOptions = [];
 
     for (let index = 0; index < optionsElements.length; index++) {
         const opt = optionsElements[index];
         const rawText = htmlToText(opt);
-        const optImages = await extractImagesFromElement(opt);
+        rawOptions.push(rawText);
+        const optImages = extractImagesFromElement(opt);
         
         let label = `Option ${index + 1}`;
         if (optImages.length > 0) {
@@ -277,16 +318,12 @@ async function handleQuestionExtraction() {
         }
     }
 
-    // Fallback: If no images found yet, check overall container
-    if (allImages.length === 0) {
-        const questionContainer = document.querySelector('div[aria-labelledby="question-answer"]') || 
-                                  document.querySelector('testtaking-question') || 
-                                  document.body;
-        const fallbackImages = await extractImagesFromElement(questionContainer);
-        allImages.push(...fallbackImages);
-    }
-
     if (!questionText && optionsText.length === 0 && allImages.length === 0) {
+        console.warn('[MCQ] No question or options detected on page.');
+        chrome.runtime.sendMessage({
+            action: 'showMCQToast',
+            message: 'No MCQ detected. Make sure an MCQ question is open.'
+        });
         return;
     }
 
@@ -295,18 +332,16 @@ async function handleQuestionExtraction() {
         finalQuestion += `\n\n[Visual Attachments: ${visualGuide.join(', ')}]`;
     }
 
-    console.log('Question:', finalQuestion);
-    console.log('Code:\n', codeText ? codeText : 'No code available');
-    console.log('Options:\n', optionsText.join('\n'));
-    console.log('[MCQ] Total Diagrams/Option Images extracted:', allImages.length);
+    console.log('[MCQ] Final Question:', finalQuestion);
+    console.log('[MCQ] Options:\n', optionsText.join('\n'));
+    console.log('[MCQ] Total Diagrams/Images:', allImages.length);
 
-    // Send the extracted data to background.js
-    // The clicking will be handled by the clickMCQOption message handler
     chrome.runtime.sendMessage({
         action: 'extractData',
         question: finalQuestion,
         code: codeText,
         options: optionsText.join('\n'),
+        rawOptions: rawOptions,
         images: allImages,
         isMCQ: true
     });
@@ -472,29 +507,35 @@ async function extractCodingQuestion(isTyped = false) {
 }    
 
 function solveIamneoExamly(){
-        // Check if this is a coding question or MCQ
-        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
-        if (codingQuestionElement) {
-            extractCodingQuestion();
-        } else {
-            handleQuestionExtraction();
-        }
+    console.log('[Alt+A] solveIamneoExamly triggered');
+    // Check if this is a coding question or MCQ
+    const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
+    if (codingQuestionElement) {
+        extractCodingQuestion(false);
+    } else {
+        handleQuestionExtraction();
+    }
 }
+
+// Alt+A (Option+A on macOS): Solve MCQ or Coding question
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && event.code === 'KeyA') {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyA' || (event.key && event.key.toLowerCase() === 'a'))) {
         event.preventDefault();
+        event.stopPropagation();
+        console.log('[Alt+A] Key detected in content.js');
         solveIamneoExamly();
     }
-});
+}, true); // useCapture: true to intercept before portal listeners
 
 // Alt+T (Option+T on macOS): Instant code insertion into editor
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && event.code === 'KeyT') {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyT' || (event.key && event.key.toLowerCase() === 't'))) {
         event.preventDefault();
+        event.stopPropagation();
         console.log('[Alt+T] Key detected in content.js - Instant Code Insertion');
 
         // Only fetch if this is a coding question
@@ -503,7 +544,7 @@ document.addEventListener('keydown', (event) => {
 
         extractCodingQuestion(false); // Direct instant mode
     }
-});
+}, true); // useCapture: true to intercept before portal listeners
 
 // Add event listener for Alt+O to toggle toast opacity.
 document.addEventListener('keydown', (event) => {
@@ -570,6 +611,110 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         addMessageToChat(content, role);
     }
 });
+
+// High-accuracy multi-tier MCQ answer parser
+function parseMCQAnswer(response, rawOptionTexts = []) {
+    if (!response || typeof response !== 'string') return null;
+    const clean = response.trim();
+
+    // 1. Explicit "Option X" or "Choice X" pattern
+    const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i);
+    if (optMatch) {
+        const val = optMatch[1].toUpperCase();
+        return isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+    }
+
+    // 2. Explicit "Answer is X" or "Correct: X" or "Ans: X"
+    const ansMatch = clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i);
+    if (ansMatch) {
+        const val = ansMatch[1].toUpperCase();
+        return isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+    }
+
+    // 3. Leading number or letter: "1. True", "B) 42", "2: foo"
+    const startMatch = clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i);
+    if (startMatch) {
+        const val = startMatch[1].toUpperCase();
+        return isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+    }
+
+    // 4. Whole response is just a single number (1-9) or letter (A-D)
+    const exactMatch = clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
+    if (exactMatch) {
+        const val = exactMatch[1].toUpperCase();
+        return isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+    }
+
+    // 5. Match against actual option texts
+    if (Array.isArray(rawOptionTexts) && rawOptionTexts.length > 0) {
+        for (let i = 0; i < rawOptionTexts.length; i++) {
+            const optText = (rawOptionTexts[i] || '').trim();
+            if (optText.length > 1 && clean.toLowerCase().includes(optText.toLowerCase())) {
+                return i;
+            }
+        }
+    }
+
+    // 6. Fallback: isolated single digit or letter
+    const fallbackMatch = clean.match(/\b([1-4]|[A-D])\b/i);
+    if (fallbackMatch) {
+        const val = fallbackMatch[1].toUpperCase();
+        return isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+    }
+
+    return null;
+}
+
+// Reliable option click simulator for Angular / Examly
+function triggerOptionClick(optionIndex) {
+    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
+    
+    const optionElements = findOptionElements();
+    let target = null;
+    
+    if (optionElements.length > optionIndex) {
+        target = optionElements[optionIndex];
+    }
+    
+    if (!target) {
+        target = document.querySelector(`#tt-option-${optionIndex}`) || 
+                 document.querySelector(`#tt-option-${optionIndex + 1}`);
+    }
+
+    if (!target) return false;
+
+    console.log(`[MCQ Click] Clicking option index ${optionIndex} (Option ${optionIndex + 1})`);
+
+    const input = target.querySelector('input[type="radio"], input[type="checkbox"]');
+    const checkmark = target.querySelector('span.checkmark1, .checkmark, label');
+    const clickTarget = checkmark || input || target;
+
+    const mouseEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+    mouseEvents.forEach(eventType => {
+        try {
+            clickTarget.dispatchEvent(new MouseEvent(eventType, {
+                bubbles: true,
+                cancelable: true,
+                view: window
+            }));
+        } catch (e) {}
+    });
+
+    try { clickTarget.click(); } catch (e) {}
+    if (clickTarget !== target) {
+        try { target.click(); } catch (e) {}
+    }
+
+    if (input) {
+        try {
+            input.checked = true;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+    }
+
+    return true;
+}
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'clickMCQOption') {
@@ -820,44 +965,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     });
                 }
             } else {
-                // Original logic for other platforms (Examly)
-                const optionMatch = request.response.match(/(?:options?\s*)?([A-D]|\d+)\.?/i);
-                if (optionMatch) {
-                    let optionNumber;
-                    if (isNaN(optionMatch[1])) {
-                        optionNumber = optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
-                    } else {
-                        optionNumber = parseInt(optionMatch[1]) - 1;
-                    }
-                    
-                    // Try multiple possible Examly option selectors
-                    let answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`) ||
-                                        document.querySelector(`#tt-option-${optionNumber} input`) ||
-                                        document.querySelector(`#tt-option-${optionNumber}`);
-                    
-                    if (!answerElement) {
-                        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"]');
-                        if (allOpts.length > optionNumber && optionNumber >= 0) {
-                            answerElement = allOpts[optionNumber].querySelector('label, input, span.checkmark1') || allOpts[optionNumber];
-                        }
-                    }
-                    
-                    if (answerElement) {
-                        answerElement.dispatchEvent(new Event("click", { bubbles: true }));
-                        answerElement.click();
-                        console.log(`Option element ${optionNumber + 1} clicked successfully`);
-                    } else {
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: request.response,
-                        });
-                    }
-                } else {
-                    chrome.runtime.sendMessage({
-                        action: 'showMCQToast',
-                        message: request.response,
-                    });
+                // Examly / Iamneo platform
+                console.log('[MCQ] Received answer for Examly:', request.response);
+                const optionIndex = parseMCQAnswer(request.response, request.rawOptions);
+                let clicked = false;
+                
+                if (optionIndex !== null && optionIndex >= 0) {
+                    clicked = triggerOptionClick(optionIndex);
+                    console.log(`[MCQ] Option click result for index ${optionIndex}: ${clicked}`);
                 }
+                
+                // Always show toast with answer confirmation so user gets instant visual feedback
+                const toastMsg = (optionIndex !== null && optionIndex >= 0)
+                    ? `Option ${optionIndex + 1}\n${request.response}`
+                    : request.response;
+
+                chrome.runtime.sendMessage({
+                    action: 'showMCQToast',
+                    message: toastMsg
+                });
             }
         } catch (error) {
             chrome.runtime.sendMessage({

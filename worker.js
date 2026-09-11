@@ -599,16 +599,53 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
     }
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false) {
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = []) {
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
         if (isMCQ) {
             chrome.tabs.sendMessage(tabId, {
                 action: 'clickMCQOption',
                 response: response,
+                rawOptions: rawOptions,
                 isHackerRank: isHackerRank,
                 isMultipleChoice: isMultipleChoice
             });
+
+            // MAIN world backup click for rock-solid DOM trigger
+            chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: function(respText) {
+                    try {
+                        const clean = (respText || '').trim();
+                        const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
+                                         clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
+                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
+                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
+                        if (!optMatch) return;
+                        const val = optMatch[1].toUpperCase();
+                        const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+                        if (idx < 0) return;
+
+                        let el = document.querySelector('#tt-option-' + idx) ||
+                                 document.querySelector('#tt-option-' + (idx + 1));
+                        if (!el) {
+                            const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+                            if (all && all.length > idx) el = all[idx];
+                        }
+                        if (el) {
+                            const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+                            const chk = el.querySelector('span.checkmark1, .checkmark, label');
+                            (chk || inp || el).click();
+                            if (inp) {
+                                inp.checked = true;
+                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    } catch(e) {}
+                },
+                args: [response],
+                world: 'MAIN'
+            }).catch(() => {});
         } else {
             // Clean code block markers and any intro/outro markdown to get 100% pure code
             let cleanedCode = response.trim();
@@ -656,6 +693,9 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
             }).catch(function(err) {
                 console.error('[worker.js] executeScript failed:', err);
             });
+
+            // Clean up spinner toast
+            removeExistingToast(tabId);
         }
     } else if (response && response.error) {
         // Error case - response contains error information
@@ -769,7 +809,10 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
                 if (isRateLimit) {
                     keyCooldowns.set(config.apiKey, Date.now() + 45000);
                 } else if (result && result.status === 400) {
-                    keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for invalid key
+                    const errStr = ((result.detailedInfo || '') + ' ' + (result.error || '')).toLowerCase();
+                    if (errStr.includes('api_key_invalid') || errStr.includes('key not valid') || errStr.includes('invalid api key')) {
+                        keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for genuinely invalid key
+                    }
                 }
 
                 if (preferredKey === config.apiKey) {
@@ -1006,6 +1049,45 @@ async function getCustomAPIConfig() {
     };
 }
 
+// Helper to resolve an image (data URL or HTTP/HTTPS URL) to valid base64 data for LLM APIs
+async function resolveImageToBase64(imgUrlOrData) {
+    if (!imgUrlOrData || typeof imgUrlOrData !== 'string') return null;
+    if (imgUrlOrData.startsWith('data:')) {
+        const match = imgUrlOrData.match(/^data:([^;]+);base64,(.+)$/s);
+        if (match) {
+            return { mimeType: match[1], data: match[2] };
+        }
+        return null;
+    }
+    if (imgUrlOrData.startsWith('http://') || imgUrlOrData.startsWith('https://')) {
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const resp = await fetch(imgUrlOrData, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (!resp.ok) return null;
+            const blob = await resp.blob();
+            const buffer = await blob.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
+            let binary = '';
+            for (let i = 0; i < bytes.byteLength; i++) {
+                binary += String.fromCharCode(bytes[i]);
+            }
+            const base64 = btoa(binary);
+            const mimeType = resp.headers.get('content-type') || blob.type || 'image/jpeg';
+            return { mimeType: mimeType.split(';')[0], data: base64 };
+        } catch (e) {
+            console.warn('[Image Resolver] Could not fetch image URL:', imgUrlOrData, e);
+            return null;
+        }
+    }
+    // If raw base64 string
+    if (/^[A-Za-z0-9+/=]+$/.test(imgUrlOrData) && imgUrlOrData.length > 50) {
+        return { mimeType: 'image/jpeg', data: imgUrlOrData };
+    }
+    return null;
+}
+
 // Function to query custom AI API
 async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = null) {
     const { aiProvider, customEndpoint, apiKey, modelName } = config;
@@ -1023,6 +1105,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
     try {
         let apiUrl, requestBody, headers;
         const imageList = Array.isArray(image) ? image : (image ? [image] : []);
+        const resolvedImages = (await Promise.all(imageList.map(img => resolveImageToBase64(img)))).filter(Boolean);
         
         // Configure API call based on provider
         switch (aiProvider) {
@@ -1033,15 +1116,13 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
                     'Authorization': `Bearer ${apiKey}`
                 };
                 let openaiContent = prompt;
-                if (imageList.length > 0) {
+                if (resolvedImages.length > 0) {
                     openaiContent = [{ type: 'text', text: prompt }];
-                    for (const img of imageList) {
-                        if (typeof img === 'string' && img.length > 0) {
-                            openaiContent.push({
-                                type: 'image_url',
-                                image_url: { url: img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}` }
-                            });
-                        }
+                    for (const img of resolvedImages) {
+                        openaiContent.push({
+                            type: 'image_url',
+                            image_url: { url: `data:${img.mimeType};base64,${img.data}` }
+                        });
                     }
                 }
                 requestBody = {
@@ -1059,25 +1140,17 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
                     'anthropic-version': '2023-06-01'
                 };
                 let anthropicContent = prompt;
-                if (imageList.length > 0) {
+                if (resolvedImages.length > 0) {
                     anthropicContent = [{ type: 'text', text: prompt }];
-                    for (const img of imageList) {
-                        if (typeof img === 'string' && img.length > 0) {
-                            const base64Data = img.includes(',') ? img.split(',')[1] : img;
-                            let mediaType = 'image/jpeg';
-                            if (img.startsWith('data:')) {
-                                const match = img.match(/data:([^;]+);/);
-                                if (match) mediaType = match[1];
+                    for (const img of resolvedImages) {
+                        anthropicContent.push({
+                            type: 'image',
+                            source: {
+                                type: 'base64',
+                                media_type: img.mimeType,
+                                data: img.data
                             }
-                            anthropicContent.push({
-                                type: 'image',
-                                source: {
-                                    type: 'base64',
-                                    media_type: mediaType,
-                                    data: base64Data
-                                }
-                            });
-                        }
+                        });
                     }
                 }
                 requestBody = {
@@ -1095,22 +1168,14 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
                 };
                 
                 const googleParts = [{ text: prompt }];
-                // Multimodal support: attach all images as inlineData
-                for (const img of imageList) {
-                    if (typeof img === 'string' && img.length > 0) {
-                        const base64Data = img.includes(',') ? img.split(',')[1] : img;
-                        let mimeType = 'image/jpeg';
-                        if (img.startsWith('data:')) {
-                            const match = img.match(/data:([^;]+);/);
-                            if (match) mimeType = match[1];
+                // Multimodal support: attach all resolved images as inlineData
+                for (const img of resolvedImages) {
+                    googleParts.push({
+                        inlineData: {
+                            mimeType: img.mimeType,
+                            data: img.data
                         }
-                        googleParts.push({
-                            inlineData: {
-                                mimeType: mimeType,
-                                data: base64Data
-                            }
-                        });
-                    }
+                    });
                 }
                 
                 const generationConfig = {
@@ -1374,6 +1439,9 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     length: queryText.length
                 });
 
+                // Show spinner toast immediately so the user has visual feedback
+                showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
+
                 // Send query and handle response
                 const reqImages = request.images || (request.image ? [request.image] : null);
                 const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id, reqImages);
@@ -1389,7 +1457,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         responseLength: response.length
                     });
                     
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions);
                     sendResponse({
                         success: true,
                         response,
@@ -1397,7 +1465,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     });
                 } else if (response && response.error) {
                     // Error case - handle the error through the response handler
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions);
                     sendResponse({
                         error: response.error,
                         status: 'error',
@@ -1406,7 +1474,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                 } else {
                     // Fallback case
                     console.error('No response received from AI service');
-                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice);
+                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions);
                     sendResponse({
                         error: 'No response from query service',
                         status: 'error',
