@@ -1205,9 +1205,9 @@ async function resolveImageToBase64(imgUrlOrData) {
 
 // Optimized Gemini caller with multi-model fallback & immediate 429 rotation
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
-    const defaultModel = 'gemini-3.5-flash';
+    const defaultModel = 'gemini-3.6-flash';
     const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
-    const fallbackModels = [primary, 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite'];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
@@ -1228,7 +1228,7 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 300 : 4096
+            maxOutputTokens: isMCQ ? 800 : 4096
         };
 
         const requestBody = {

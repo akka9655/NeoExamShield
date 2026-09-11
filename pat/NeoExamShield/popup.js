@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.5-flash'
+                modelName: 'gemini-3.6-flash'
             }));
             return { configs };
         }
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.5-flash'
+                modelName: 'gemini-3.6-flash'
             }));
 
             const fbConfig = (typeof window !== 'undefined' && window.FIREBASE_CONFIG) ? window.FIREBASE_CONFIG : null;
@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                         aiProvider: f.aiProvider?.stringValue || 'google',
                                         customEndpoint: f.customEndpoint?.stringValue || '',
                                         apiKey: key,
-                                        modelName: f.modelName?.stringValue || 'gemini-3.5-flash'
+                                        modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
                                     });
                                 }
                             }
@@ -166,7 +166,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     aiProvider: f.aiProvider?.stringValue || 'google',
                     customEndpoint: f.customEndpoint?.stringValue || '',
                     apiKey: f.apiKey?.stringValue || '',
-                    modelName: f.modelName?.stringValue || 'gemini-3.5-flash'
+                    modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
                 };
             }).filter(c => Boolean(c.apiKey));
 
