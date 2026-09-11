@@ -1,5 +1,11 @@
-// Production stealth: silence all console logs and errors from extension
-const console = { log: () => {}, warn: () => {}, error: () => {}, info: () => {}, debug: () => {} };
+// Production stealth: silence all console logs and errors from extension safely
+try {
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+    console.info = () => {};
+    console.debug = () => {};
+} catch (e) {}
 
 window.addEventListener('blur', function() {
     window.focus();

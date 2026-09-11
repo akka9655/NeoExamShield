@@ -6,7 +6,11 @@ if (typeof window.isMac === 'undefined') {
 
 // Auto-answering and Random Key Press Typing mechanism
 (function () {
-  const console = { log: () => {}, warn: () => {}, error: () => {}, info: () => {}, debug: () => {} };
+  try {
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+  } catch (e) {}
   let editor;
   let currentCode = "";
   let charIndex = 0;
