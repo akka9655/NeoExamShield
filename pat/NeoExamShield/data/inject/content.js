@@ -367,12 +367,16 @@ async function handleQuestionExtraction() {
 async function extractCodingQuestion(isTyped = false) {
     // Extract programming language
     const programmingLanguageElement = document.querySelector('span.inner-text');
-    const programmingLanguage = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'Programming language not found.';
+    let programmingLanguage = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'Programming language not found.';
+    programmingLanguage = programmingLanguage.replace(/\s*\(\d+\)/g, '').trim();
 
     // Extract question components
     const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
     const questionText = questionElement ? htmlToText(questionElement) : 'Question not found.';
     const images = await extractImagesFromElement(questionElement);
+
+    const constraintsElement = document.querySelector('div[aria-labelledby="code-constraints"], div[aria-labelledby="constraints"]');
+    const constraintsText = constraintsElement ? htmlToText(constraintsElement) : '';
 
     const inputFormatElement = document.querySelector('div[aria-labelledby="input-format"]');
     const inputFormatText = inputFormatElement ? htmlToText(inputFormatElement) : '';
@@ -504,6 +508,7 @@ async function extractCodingQuestion(isTyped = false) {
         action: 'extractData',
         programmingLanguage: programmingLanguage,
         question: questionText,
+        constraints: constraintsText,
         inputFormat: inputFormatText,
         outputFormat: outputFormatText,
         testCases: testCasesText,

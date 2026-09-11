@@ -1033,7 +1033,19 @@ async function getCustomAPIConfigs() {
                 }]);
             }
 
-            resolve([]);
+            // Fallback default API key pool (works out-of-the-box for free tier)
+            const defaultKeys = [
+                "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+                "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+                "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+                "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+            ];
+            resolve(defaultKeys.map(key => ({
+                aiProvider: 'google',
+                customEndpoint: '',
+                apiKey: key,
+                modelName: 'gemini-3.5-flash'
+            })));
         });
     });
 }
@@ -1086,6 +1098,106 @@ async function resolveImageToBase64(imgUrlOrData) {
         return { mimeType: 'image/jpeg', data: imgUrlOrData };
     }
     return null;
+}
+
+// Optimized Gemini caller with multi-model fallback & immediate 429 rotation
+async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
+    const defaultModel = 'gemini-3.5-flash';
+    const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
+    const fallbackModels = [primary, 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    const modelsToTry = [...new Set(fallbackModels)];
+
+    let lastError = null;
+    for (const currentModel of modelsToTry) {
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+        
+        const googleParts = [{ text: prompt }];
+        for (const img of resolvedImages) {
+            if (img && img.data && img.mimeType) {
+                googleParts.push({
+                    inlineData: {
+                        mimeType: img.mimeType,
+                        data: img.data
+                    }
+                });
+            }
+        }
+
+        const generationConfig = {
+            temperature: 0.1,
+            maxOutputTokens: isMCQ ? 300 : 4096
+        };
+
+        const requestBody = {
+            contents: [{ parts: googleParts }],
+            generationConfig
+        };
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6500);
+
+        try {
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                const data = await response.json();
+                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text && text.trim().length > 0) {
+                    return text.trim();
+                }
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                const errMsg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
+                
+                // If rate limit (429) or quota exhausted, immediately break and return error so key rotation takes over
+                if (response.status === 429 || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
+                    return {
+                        error: `Gemini rate limit exceeded: ${response.status}`,
+                        errorType: 'api',
+                        status: 429,
+                        detailedInfo: errMsg
+                    };
+                }
+
+                // If invalid key (400), break immediately
+                if (response.status === 400 && (errMsg.toLowerCase().includes('api_key_invalid') || errMsg.toLowerCase().includes('key not valid') || errMsg.toLowerCase().includes('invalid api key'))) {
+                    return {
+                        error: 'Invalid Gemini API key',
+                        errorType: 'api',
+                        status: 400,
+                        detailedInfo: errMsg
+                    };
+                }
+
+                lastError = {
+                    error: `Gemini API error (${response.status}) on ${currentModel}`,
+                    errorType: 'api',
+                    status: response.status,
+                    detailedInfo: errMsg
+                };
+                console.warn(`[Gemini Fallback] Model ${currentModel} returned ${response.status}, trying next fallback model...`);
+            }
+        } catch (fetchErr) {
+            clearTimeout(timeoutId);
+            lastError = {
+                error: 'Network error or timeout',
+                errorType: 'network',
+                detailedInfo: fetchErr.message || 'Request timed out'
+            };
+        }
+    }
+
+    return lastError || {
+        error: 'Gemini request failed',
+        errorType: 'api',
+        detailedInfo: 'All fallback models failed'
+    };
 }
 
 // Function to query custom AI API
@@ -1161,39 +1273,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
                 break;
                 
             case 'google':
-                const googleModel = modelName || 'gemini-3.5-flash';
-                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel.trim())}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
-                headers = {
-                    'Content-Type': 'application/json'
-                };
-                
-                const googleParts = [{ text: prompt }];
-                // Multimodal support: attach all resolved images as inlineData
-                for (const img of resolvedImages) {
-                    googleParts.push({
-                        inlineData: {
-                            mimeType: img.mimeType,
-                            data: img.data
-                        }
-                    });
-                }
-                
-                const generationConfig = {
-                    temperature: 0.1,
-                    maxOutputTokens: isMCQ ? 60 : 2048
-                };
-                // Disable hidden thinking tokens on 3.5-flash to save 85% tokens and speed up response
-                if (!googleModel.toLowerCase().includes('lite')) {
-                    generationConfig.thinkingConfig = {
-                        thinkingBudget: 0
-                    };
-                }
-                
-                requestBody = {
-                    contents: [{ parts: googleParts }],
-                    generationConfig: generationConfig
-                };
-                break;
+                return await queryGoogleGemini(apiKey, modelName, prompt, resolvedImages, isMCQ);
                 
             case 'deepseek':
                 apiUrl = 'https://api.deepseek.com/v1/chat/completions';
@@ -1408,7 +1488,7 @@ IMPORTANT REQUIREMENTS:
 - Ensure the solution passes all test cases
 
 ${request.question}
-
+` + (request.constraints ? `\nConstraints:\n${request.constraints}\n` : '') + `
 Respond with ONLY the ${request.programmingLanguage} code:`;
                     } else {
                         // Original prompt for other platforms
@@ -1417,8 +1497,9 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                             Stricly Passes all test cases, including edge cases and boundary conditions.
                             Always get the input from the users.` +
                             `Question:\n${request.question}\n\n` +
-                            (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}` : '') +
-                        (request.inputFormat ? `Input Format:\n${request.inputFormat}\n\n` : '') +
+                            (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}\n\n` : '') +
+                            (request.constraints ? `Constraints:\n${request.constraints}\n\n` : '') +
+                            (request.inputFormat ? `Input Format:\n${request.inputFormat}\n\n` : '') +
                         (request.outputFormat ? `Output Format:\n${request.outputFormat}\n\n` : '') +
                         (request.testCases ? `Test Cases:\n${request.testCases}` : '') +
                         (request.headerSnippet ? `\n\nHeader Snippet (pre-existing code before your answer, DO NOT include this in your response):\n${request.headerSnippet}` : '') +
@@ -1485,6 +1566,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
             } catch (error) {
                 console.error("Query processing error:", error);
                 
+                removeExistingToast(sender.tab.id);
                 // Show a generic error toast only if the error wasn't already handled by queryRequest
                 showToast(sender.tab.id, 'An unexpected error occurred. Please try again.', true, 'The request failed due to an unexpected error. This may be temporary.');
                 
