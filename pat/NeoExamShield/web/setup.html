@@ -1442,7 +1442,7 @@
 
                 // Direct client testing for Google Gemini
                 if (provider === 'google') {
-                    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`;
+                    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-1.5-flash'}:generateContent?key=${apiKey}`;
                     const res = await fetch(testUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1453,7 +1453,13 @@
                         success = true;
                     } else {
                         const errData = await res.json().catch(() => ({}));
-                        errorMsg = errData.error?.message || `HTTP ${res.status}`;
+                        if (res.status === 429) {
+                            errorMsg = "API Quota Exceeded / Out of Balance. Try another key.";
+                        } else if (res.status === 400 && errData.error?.message?.includes('API key not valid')) {
+                            errorMsg = "Invalid API Key. Please check the key.";
+                        } else {
+                            errorMsg = errData.error?.message || `HTTP ${res.status}: Quota or permission error.`;
+                        }
                     }
                 } else if (provider === 'openai') {
                     const testUrl = 'https://api.openai.com/v1/chat/completions';
