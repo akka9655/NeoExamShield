@@ -943,11 +943,281 @@
             line-height: 1.45;
         }
 
-        .safety-item strong {
-            display: block;
-            color: #0F172A;
+        /* ============================================== */
+        /* SLEEK GUIDE & SHORTCUTS TRIGGER BUTTON         */
+        /* ============================================== */
+        .btn-guide-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            width: 100%;
+            background: linear-gradient(135deg, rgba(22, 134, 255, 0.05) 0%, rgba(16, 185, 129, 0.05) 100%);
+            border: 1.5px solid rgba(22, 134, 255, 0.25);
+            border-radius: 14px;
+            padding: 0.95rem 1.15rem;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 2px 8px rgba(22, 134, 255, 0.06);
+            position: relative;
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+
+        .btn-guide-trigger:hover {
+            background: linear-gradient(135deg, rgba(22, 134, 255, 0.1) 0%, rgba(16, 185, 129, 0.1) 100%);
+            border-color: var(--primary);
+            box-shadow: 0 4px 16px rgba(22, 134, 255, 0.15);
+            transform: translateY(-1.5px);
+        }
+
+        .btn-guide-trigger:active {
+            transform: translateY(0);
+        }
+
+        .trigger-icon-circle {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #1686FF 0%, #0066D6 100%);
+            color: #FFFFFF;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(22, 134, 255, 0.3);
+        }
+
+        .trigger-text-group {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+        }
+
+        .trigger-main-text {
+            font-size: 0.88rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.2px;
+        }
+
+        .trigger-sub-text {
+            font-size: 0.74rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .trigger-arrow {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--primary);
+            transition: transform 0.2s ease;
+        }
+
+        .btn-guide-trigger:hover .trigger-arrow {
+            transform: translateX(3px);
+        }
+
+        /* ============================================== */
+        /* MODERN ACCESSIBLE MODAL DIALOG                 */
+        /* ============================================== */
+        .guide-modal {
+            margin: auto;
+            padding: 0;
+            border: none;
+            border-radius: 20px;
+            background: #FFFFFF;
+            box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+            width: 92%;
+            max-width: 600px;
+            max-height: 88vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            z-index: 10000;
+            animation: modalScaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .guide-modal:not([open]) {
+            display: none;
+        }
+
+        .guide-modal::backdrop {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            animation: backdropFadeIn 0.25s ease;
+        }
+
+        @keyframes modalScaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95) translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        @keyframes backdropFadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal-header {
+            padding: 1.25rem 1.4rem;
+            border-bottom: 1px solid #EEF2F6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #FFFFFF;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        .modal-title-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-title {
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.3px;
+        }
+
+        .modal-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .btn-close-modal {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            border: 1px solid #E2E8F0;
+            background: #F8FAFC;
+            color: #64748B;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-close-modal:hover {
+            background: #F1F5F9;
+            color: var(--text);
+            transform: rotate(90deg);
+        }
+
+        /* Modal Nav Tabs */
+        .modal-tabs {
+            display: flex;
+            background: #F1F5F9;
+            padding: 4px;
+            border-radius: 12px;
+            margin: 1rem 1.4rem 0 1.4rem;
+            gap: 4px;
+        }
+
+        .modal-tab-btn {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 0.775rem;
             font-weight: 700;
-            margin-bottom: 2px;
+            color: #64748B;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .modal-tab-btn.active {
+            background: #FFFFFF;
+            color: var(--primary);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+        }
+
+        .modal-body {
+            padding: 1rem 1.4rem 1.4rem 1.4rem;
+            overflow-y: auto;
+            flex: 1;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .modal-body::-webkit-scrollbar {
+            width: 6px;
+        }
+        .modal-body::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .modal-body::-webkit-scrollbar-thumb {
+            background: #CBD5E1;
+            border-radius: 10px;
+        }
+
+        .modal-footer {
+            padding: 0.9rem 1.4rem;
+            border-top: 1px solid #EEF2F6;
+            display: flex;
+            justify-content: flex-end;
+            background: #FAFBFD;
+        }
+
+        @media (max-width: 640px) {
+            .guide-modal {
+                width: 100%;
+                max-width: 100%;
+                max-height: 92vh;
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+                margin-bottom: 0;
+                margin-top: auto;
+                animation: modalSlideUp 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+            }
+            @keyframes modalSlideUp {
+                from {
+                    transform: translateY(100%);
+                    opacity: 0.5;
+                }
+                to {
+                    transform: translateY(0);
+                    opacity: 1;
+                }
+            }
+            .modal-header {
+                padding: 1rem;
+            }
+            .modal-tabs {
+                margin: 0.75rem 1rem 0 1rem;
+            }
+            .modal-tab-btn {
+                font-size: 0.72rem;
+                padding: 6px 4px;
+            }
+            .modal-body {
+                padding: 0.85rem 1rem 1rem 1rem;
+            }
+            .btn-guide-trigger {
+                padding: 0.8rem 0.95rem;
+                margin-top: 1.25rem;
+            }
         }
     </style>
 
@@ -1008,181 +1278,15 @@
             <button type="button" onclick="toggleAuthMode()" id="authToggleLink" class="btn-link">Sign Up</button>
         </div>
 
-        <!-- Quick 3-Step Setup Collapsible on Auth View -->
-        <div class="setup-guide-card" style="margin-top: 1.5rem; margin-bottom: 0;">
-            <div class="setup-guide-header" onclick="toggleAuthSetupGuide()">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.1rem;">⚡</span>
-                    <span style="font-weight: 800; font-size: 0.9rem; color: var(--text);">Quick Setup & All Shortcuts</span>
-                </div>
-                <span id="authSetupGuideChevron" style="font-size: 0.8rem; color: var(--text-muted); display: inline-block; transition: transform 0.25s ease;">▼</span>
+        <!-- Quick Setup & Shortcuts Trigger Button -->
+        <button type="button" class="btn-guide-trigger" onclick="openGuideModal()">
+            <div class="trigger-icon-circle">⚡</div>
+            <div class="trigger-text-group">
+                <span class="trigger-main-text">Quick Setup & Keyboard Shortcuts</span>
+                <span class="trigger-sub-text">View all 7 shortcuts (Alt+A, Alt+X typing mode, stealth & lab tips)</span>
             </div>
-            <div id="authSetupGuideContent" class="setup-guide-body hidden">
-                <div class="step-item">
-                    <div class="step-badge">1</div>
-                    <div class="step-text">
-                        <strong>Download Extension:</strong>
-                        <div>Get the official <a href="https://github.com/akka9655/NeoExamShield/releases/download/v1.0.0/NeoExamShield.zip" class="step-link" target="_blank">NeoExamShield ZIP</a> and extract it.</div>
-                    </div>
-                </div>
-                <div class="step-item">
-                    <div class="step-badge">2</div>
-                    <div class="step-text">
-                        <strong>Load into Chrome:</strong>
-                        <div>Open <code class="code-pill">chrome://extensions/</code>, toggle ON <strong>Developer mode</strong>, and click <strong>Load unpacked</strong>.</div>
-                    </div>
-                </div>
-                <div class="step-item">
-                    <div class="step-badge">3</div>
-                    <div class="step-text">
-                        <strong>Sign Up & 1-Click Sync:</strong>
-                        <div>Sign up above with any 3-digit username, paste your free Gemini API key, and sync in the extension popup!</div>
-                    </div>
-                </div>
-
-                <!-- Shortcuts Cheat Sheet Box -->
-                <div class="shortcut-box">
-                    <div class="shortcut-header-flex">
-                        <div class="shortcut-main-title">
-                            <span>⌨️ Extension Keyboard Shortcuts</span>
-                        </div>
-                        <div class="os-hint"><span class="os-key">Alt</span> (Windows/Linux) &bull; <span class="os-key">⌥ Option</span> (Mac)</div>
-                    </div>
-
-                    <!-- Category 1: Exam Solving -->
-                    <div class="shortcut-category-title">
-                        <span>🎯 Exam Auto-Solving</span>
-                        <span class="category-pill-count">2 Shortcuts</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">A</span>
-                                </div>
-                                <span class="shortcut-tag tag-blue">MCQ Auto-Click</span>
-                            </div>
-                            <div class="shortcut-action-title">Instant MCQ Auto-Solver</div>
-                            <div class="shortcut-desc-detail">Automatically reads question text, mathematical formulas, code blocks & image/diagram choices. Analyzes via Gemini in background and auto-clicks the correct radio button.</div>
-                            <div class="shortcut-subtip">✨ Full support for diagram questions & image-based options with zero clicks.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">T</span>
-                                </div>
-                                <span class="shortcut-tag tag-emerald">Fast Code (~1s)</span>
-                            </div>
-                            <div class="shortcut-action-title">Instant Fast Code Injection</div>
-                            <div class="shortcut-desc-detail">Solves coding questions taking full constraints and syntax into account (C, C++, Java, Python). Direct-injects clean, tested executable code into the Ace editor in ~1s.</div>
-                            <div class="shortcut-subtip">⚡ Ideal when you need complete solutions right before submission.</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 2: College Lab Stealth Typing -->
-                    <div class="shortcut-category-title">
-                        <span>🕵️ College Lab Stealth & Human Typing</span>
-                        <span class="category-pill-count">2 Shortcuts</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">X</span>
-                                </div>
-                                <span class="shortcut-tag tag-purple">Hacker Typer 🛡️</span>
-                            </div>
-                            <div class="shortcut-action-title">Random Keypress Typing Mode</div>
-                            <div class="shortcut-desc-detail">AI generates the complete solution silently. Then, as you tap <strong>any random keys</strong> on your physical keyboard, real code characters appear one-by-one in the editor!</div>
-                            <div class="shortcut-subtip">👀 Proctors walking past see your fingers furiously typing real code. 100% natural and undetectable.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">C</span>
-                                </div>
-                                <span class="shortcut-tag tag-amber">Halt / Cancel</span>
-                            </div>
-                            <div class="shortcut-action-title">Emergency Stop Typing</div>
-                            <div class="shortcut-desc-detail">Instantly cancels random key typing simulator and restores standard keyboard input.</div>
-                            <div class="shortcut-subtip">🛡️ Auto-Cancel: Typing simulator also stops automatically if you switch or click to another question!</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 3: Stealth & Anti-Proctor -->
-                    <div class="shortcut-category-title">
-                        <span>👁️ Stealth & Visibility Controls</span>
-                        <span class="category-pill-count">3 Controls</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">Z</span>
-                                </div>
-                                <span class="shortcut-tag tag-rose">Ghost Mode 👻</span>
-                            </div>
-                            <div class="shortcut-action-title">Silent / Color Toast Toggle</div>
-                            <div class="shortcut-desc-detail">Toggles the top color status toast completely ON or OFF. In Ghost Mode (OFF), the extension runs completely invisibly with <strong>zero UI banners or toasts</strong> on screen.</div>
-                            <div class="shortcut-subtip">🔒 Essential for strict lab exams where absolutely no extension UI should be seen.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">O</span>
-                                </div>
-                                <span class="shortcut-tag tag-blue">Opacity</span>
-                            </div>
-                            <div class="shortcut-action-title">Toast Opacity Cycle</div>
-                            <div class="shortcut-desc-detail">Cycles the status toast transparency (100% &rarr; 75% &rarr; 50% &rarr; 25%) to blend discreetly into any screen brightness.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">S</span>
-                                </div>
-                                <span class="shortcut-tag tag-purple">Bypass</span>
-                            </div>
-                            <div class="shortcut-action-title">Stealth Screenshare Bridge</div>
-                            <div class="shortcut-desc-detail">Overrides forced fullscreen screenshare requirements. Share a single tab/window, a blank black screen, or a frozen frame while solving in another window.</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 4: Lab Safety & Wi-Fi FAQ -->
-                    <div class="shortcut-category-title">
-                        <span>🛡️ College Wi-Fi & Safety Tips</span>
-                    </div>
-                    <div class="lab-safety-box">
-                        <div class="safety-item">
-                            <strong>📶 Can college Wi-Fi or lab admins detect this?</strong>
-                            <span>No. All AI API calls use standard HTTPS encrypted TLS traffic on port 443 (same domain as Google Cloud & OpenAI). Network firewalls only see encrypted Google traffic.</span>
-                        </div>
-                        <div class="safety-item">
-                            <strong>⚡ Free Gemini Rate Limit Tip:</strong>
-                            <span>Google gives 15 free requests/min. Add 2 to 4 free keys from Google AI Studio. If one key hits quota limits, NeoExamShield automatically switches to your next backup key with 0ms delay!</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <span class="trigger-arrow">&rarr;</span>
+        </button>
     </div>
 
     <!-- ============================================== -->
@@ -1214,181 +1318,15 @@
             </button>
         </div>
 
-        <!-- Fast Setup Guide Card on Dashboard -->
-        <div class="setup-guide-card">
-            <div class="setup-guide-header" onclick="toggleSetupGuide()">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.1rem;">⚡</span>
-                    <span style="font-weight: 800; font-size: 0.95rem; color: var(--text);">Quick Setup & All Shortcuts</span>
-                </div>
-                <span id="setupGuideChevron" style="font-size: 0.8rem; color: var(--text-muted); display: inline-block; transition: transform 0.25s ease; transform: rotate(180deg);">▼</span>
+        <!-- Quick Setup & Shortcuts Trigger Button -->
+        <button type="button" class="btn-guide-trigger" onclick="openGuideModal()" style="margin-bottom: 1.5rem; margin-top: 0;">
+            <div class="trigger-icon-circle">⚡</div>
+            <div class="trigger-text-group">
+                <span class="trigger-main-text">Quick Setup & Keyboard Shortcuts</span>
+                <span class="trigger-sub-text">View all 7 shortcuts (Alt+A, Alt+X typing mode, stealth & lab tips)</span>
             </div>
-            <div id="setupGuideContent" class="setup-guide-body">
-                <div class="step-item">
-                    <div class="step-badge">1</div>
-                    <div class="step-text">
-                        <strong>Download & Extract Extension:</strong>
-                        <div>Download the <a href="https://github.com/akka9655/NeoExamShield/releases/download/v1.0.0/NeoExamShield.zip" class="step-link" target="_blank">NeoExamShield ZIP</a> and extract it to a folder.</div>
-                    </div>
-                </div>
-                <div class="step-item">
-                    <div class="step-badge">2</div>
-                    <div class="step-text">
-                        <strong>Load into Chrome:</strong>
-                        <div>Open <code class="code-pill">chrome://extensions/</code> in your browser, toggle ON <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, and select the extracted folder.</div>
-                    </div>
-                </div>
-                <div class="step-item">
-                    <div class="step-badge">3</div>
-                    <div class="step-text">
-                        <strong>1-Click Key Sync:</strong>
-                        <div>Copy your <strong>3-digit Sync Code</strong> above, open the NeoExamShield extension popup from your Chrome toolbar, paste the code, and click <strong>Sync Keys</strong>.</div>
-                    </div>
-                </div>
-
-                <!-- Shortcuts Cheat Sheet Box -->
-                <div class="shortcut-box">
-                    <div class="shortcut-header-flex">
-                        <div class="shortcut-main-title">
-                            <span>⌨️ Extension Keyboard Shortcuts</span>
-                        </div>
-                        <div class="os-hint"><span class="os-key">Alt</span> (Windows/Linux) &bull; <span class="os-key">⌥ Option</span> (Mac)</div>
-                    </div>
-
-                    <!-- Category 1: Exam Solving -->
-                    <div class="shortcut-category-title">
-                        <span>🎯 Exam Auto-Solving</span>
-                        <span class="category-pill-count">2 Shortcuts</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">A</span>
-                                </div>
-                                <span class="shortcut-tag tag-blue">MCQ Auto-Click</span>
-                            </div>
-                            <div class="shortcut-action-title">Instant MCQ Auto-Solver</div>
-                            <div class="shortcut-desc-detail">Automatically reads question text, mathematical formulas, code blocks & image/diagram choices. Analyzes via Gemini in background and auto-clicks the correct radio button.</div>
-                            <div class="shortcut-subtip">✨ Full support for diagram questions & image-based options with zero clicks.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">T</span>
-                                </div>
-                                <span class="shortcut-tag tag-emerald">Fast Code (~1s)</span>
-                            </div>
-                            <div class="shortcut-action-title">Instant Fast Code Injection</div>
-                            <div class="shortcut-desc-detail">Solves coding questions taking full constraints and syntax into account (C, C++, Java, Python). Direct-injects clean, tested executable code into the Ace editor in ~1s.</div>
-                            <div class="shortcut-subtip">⚡ Ideal when you need complete solutions right before submission.</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 2: College Lab Stealth Typing -->
-                    <div class="shortcut-category-title">
-                        <span>🕵️ College Lab Stealth & Human Typing</span>
-                        <span class="category-pill-count">2 Shortcuts</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">X</span>
-                                </div>
-                                <span class="shortcut-tag tag-purple">Hacker Typer 🛡️</span>
-                            </div>
-                            <div class="shortcut-action-title">Random Keypress Typing Mode</div>
-                            <div class="shortcut-desc-detail">AI generates the complete solution silently. Then, as you tap <strong>any random keys</strong> on your physical keyboard, real code characters appear one-by-one in the editor!</div>
-                            <div class="shortcut-subtip">👀 Proctors walking past see your fingers furiously typing real code. 100% natural and undetectable.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">C</span>
-                                </div>
-                                <span class="shortcut-tag tag-amber">Halt / Cancel</span>
-                            </div>
-                            <div class="shortcut-action-title">Emergency Stop Typing</div>
-                            <div class="shortcut-desc-detail">Instantly cancels random key typing simulator and restores standard keyboard input.</div>
-                            <div class="shortcut-subtip">🛡️ Auto-Cancel: Typing simulator also stops automatically if you switch or click to another question!</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 3: Stealth & Anti-Proctor -->
-                    <div class="shortcut-category-title">
-                        <span>👁️ Stealth & Visibility Controls</span>
-                        <span class="category-pill-count">3 Controls</span>
-                    </div>
-                    <div class="shortcut-list">
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge accent">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge accent">Z</span>
-                                </div>
-                                <span class="shortcut-tag tag-rose">Ghost Mode 👻</span>
-                            </div>
-                            <div class="shortcut-action-title">Silent / Color Toast Toggle</div>
-                            <div class="shortcut-desc-detail">Toggles the top color status toast completely ON or OFF. In Ghost Mode (OFF), the extension runs completely invisibly with <strong>zero UI banners or toasts</strong> on screen.</div>
-                            <div class="shortcut-subtip">🔒 Essential for strict lab exams where absolutely no extension UI should be seen.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">O</span>
-                                </div>
-                                <span class="shortcut-tag tag-blue">Opacity</span>
-                            </div>
-                            <div class="shortcut-action-title">Toast Opacity Cycle</div>
-                            <div class="shortcut-desc-detail">Cycles the status toast transparency (100% &rarr; 75% &rarr; 50% &rarr; 25%) to blend discreetly into any screen brightness.</div>
-                        </div>
-
-                        <div class="shortcut-card">
-                            <div class="shortcut-card-top">
-                                <div class="shortcut-keys">
-                                    <span class="kbd-badge">Alt</span>
-                                    <span class="kbd-plus">+</span>
-                                    <span class="kbd-badge">S</span>
-                                </div>
-                                <span class="shortcut-tag tag-purple">Bypass</span>
-                            </div>
-                            <div class="shortcut-action-title">Stealth Screenshare Bridge</div>
-                            <div class="shortcut-desc-detail">Overrides forced fullscreen screenshare requirements. Share a single tab/window, a blank black screen, or a frozen frame while solving in another window.</div>
-                        </div>
-                    </div>
-
-                    <!-- Category 4: Lab Safety & Wi-Fi FAQ -->
-                    <div class="shortcut-category-title">
-                        <span>🛡️ College Wi-Fi & Safety Tips</span>
-                    </div>
-                    <div class="lab-safety-box">
-                        <div class="safety-item">
-                            <strong>📶 Can college Wi-Fi or lab admins detect this?</strong>
-                            <span>No. All AI API calls use standard HTTPS encrypted TLS traffic on port 443 (same domain as Google Cloud & OpenAI). Network firewalls only see encrypted Google traffic.</span>
-                        </div>
-                        <div class="safety-item">
-                            <strong>⚡ Free Gemini Rate Limit Tip:</strong>
-                            <span>Google gives 15 free requests/min. Add 2 to 4 free keys from Google AI Studio. If one key hits quota limits, NeoExamShield automatically switches to your next backup key with 0ms delay!</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+            <span class="trigger-arrow">&rarr;</span>
+        </button>
 
         <div style="margin-bottom: 1.25rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
@@ -1429,6 +1367,222 @@
             Save All Changes
         </button>
     </div>
+
+    <!-- ============================================== -->
+    <!-- 3. MODAL: QUICK SETUP & KEYBOARD SHORTCUTS      -->
+    <!-- ============================================== -->
+    <dialog id="guideModal" class="guide-modal" closedby="any" aria-labelledby="modalTitle">
+        <!-- Modal Header -->
+        <div class="modal-header">
+            <div class="modal-title-group">
+                <div class="trigger-icon-circle" style="width: 34px; height: 34px; font-size: 1rem;">⚡</div>
+                <div>
+                    <h2 class="modal-title" id="modalTitle">Setup & Shortcut Guide</h2>
+                    <p class="modal-sub">Fast setup, all 7 shortcuts & college lab stealth</p>
+                </div>
+            </div>
+            <button type="button" class="btn-close-modal" onclick="closeGuideModal()" title="Close (Esc)">✕</button>
+        </div>
+
+        <!-- Modal Tabs Switcher -->
+        <div class="modal-tabs">
+            <button type="button" class="modal-tab-btn active" id="tabBtnShortcuts" onclick="switchModalTab('shortcuts')">
+                <span>⌨️</span> <span>All Shortcuts (7)</span>
+            </button>
+            <button type="button" class="modal-tab-btn" id="tabBtnSetup" onclick="switchModalTab('setup')">
+                <span>⚡</span> <span>Fast Setup</span>
+            </button>
+            <button type="button" class="modal-tab-btn" id="tabBtnSafety" onclick="switchModalTab('safety')">
+                <span>🛡️</span> <span>Lab Safety & FAQ</span>
+            </button>
+        </div>
+
+        <!-- Modal Scrollable Content -->
+        <div class="modal-body">
+            <!-- TAB 1: ALL SHORTCUTS -->
+            <div id="tabContentShortcuts" class="tab-pane">
+                <div class="shortcut-box" style="margin-top: 0; border: none; padding: 0; box-shadow: none;">
+                    <div class="shortcut-header-flex" style="margin-bottom: 0.5rem; padding-bottom: 0.5rem;">
+                        <div class="shortcut-main-title">
+                            <span>⌨️ 7 Keyboard Shortcuts Matrix</span>
+                        </div>
+                        <div class="os-hint"><span class="os-key">Alt</span> (Win/Linux) &bull; <span class="os-key">⌥ Option</span> (Mac)</div>
+                    </div>
+
+                    <!-- Category 1: Exam Solving -->
+                    <div class="shortcut-category-title">
+                        <span>🎯 Exam Auto-Solving</span>
+                        <span class="category-pill-count">2 Shortcuts</span>
+                    </div>
+                    <div class="shortcut-list">
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge accent">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge accent">A</span>
+                                </div>
+                                <span class="shortcut-tag tag-blue">MCQ Auto-Click</span>
+                            </div>
+                            <div class="shortcut-action-title">Instant MCQ Auto-Solver</div>
+                            <div class="shortcut-desc-detail">Automatically reads question text, mathematical formulas, code blocks & image/diagram choices. Analyzes via Gemini in background and auto-clicks the correct radio button.</div>
+                            <div class="shortcut-subtip">✨ Full support for diagram questions & image-based options with zero clicks.</div>
+                        </div>
+
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge accent">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge accent">T</span>
+                                </div>
+                                <span class="shortcut-tag tag-emerald">Fast Code (~1s)</span>
+                            </div>
+                            <div class="shortcut-action-title">Instant Fast Code Injection</div>
+                            <div class="shortcut-desc-detail">Solves coding questions taking full constraints and syntax into account (C, C++, Java, Python). Direct-injects clean, tested executable code into the Ace editor in ~1s.</div>
+                            <div class="shortcut-subtip">⚡ Ideal when you need complete solutions right before submission.</div>
+                        </div>
+                    </div>
+
+                    <!-- Category 2: College Lab Stealth Typing -->
+                    <div class="shortcut-category-title">
+                        <span>🕵️ College Lab Stealth & Human Typing</span>
+                        <span class="category-pill-count">2 Shortcuts</span>
+                    </div>
+                    <div class="shortcut-list">
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge accent">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge accent">X</span>
+                                </div>
+                                <span class="shortcut-tag tag-purple">Hacker Typer 🛡️</span>
+                            </div>
+                            <div class="shortcut-action-title">Random Keypress Typing Mode</div>
+                            <div class="shortcut-desc-detail">AI generates the complete solution silently. Then, as you tap <strong>any random keys</strong> on your physical keyboard, real code characters appear one-by-one in the editor!</div>
+                            <div class="shortcut-subtip">👀 Proctors walking past see your fingers furiously typing real code. 100% natural and undetectable.</div>
+                        </div>
+
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge">C</span>
+                                </div>
+                                <span class="shortcut-tag tag-amber">Halt / Cancel</span>
+                            </div>
+                            <div class="shortcut-action-title">Emergency Stop Typing</div>
+                            <div class="shortcut-desc-detail">Instantly cancels random key typing simulator and restores standard keyboard input.</div>
+                            <div class="shortcut-subtip">🛡️ Auto-Cancel: Simulator also halts automatically if you click or switch to another question!</div>
+                        </div>
+                    </div>
+
+                    <!-- Category 3: Stealth & Anti-Proctor -->
+                    <div class="shortcut-category-title">
+                        <span>👁️ Stealth & Visibility Controls</span>
+                        <span class="category-pill-count">3 Controls</span>
+                    </div>
+                    <div class="shortcut-list">
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge accent">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge accent">Z</span>
+                                </div>
+                                <span class="shortcut-tag tag-rose">Ghost Mode 👻</span>
+                            </div>
+                            <div class="shortcut-action-title">Silent / Color Toast Toggle</div>
+                            <div class="shortcut-desc-detail">Toggles the top color status toast completely ON or OFF. In Ghost Mode (OFF), the extension runs completely invisibly with <strong>zero UI banners or toasts</strong> on screen.</div>
+                            <div class="shortcut-subtip">🔒 Essential for strict lab exams where absolutely no extension UI should be seen.</div>
+                        </div>
+
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge">O</span>
+                                </div>
+                                <span class="shortcut-tag tag-blue">Opacity</span>
+                            </div>
+                            <div class="shortcut-action-title">Toast Opacity Cycle</div>
+                            <div class="shortcut-desc-detail">Cycles the status toast transparency (100% &rarr; 75% &rarr; 50% &rarr; 25%) to blend discreetly into any screen brightness.</div>
+                        </div>
+
+                        <div class="shortcut-card">
+                            <div class="shortcut-card-top">
+                                <div class="shortcut-keys">
+                                    <span class="kbd-badge">Alt</span>
+                                    <span class="kbd-plus">+</span>
+                                    <span class="kbd-badge">S</span>
+                                </div>
+                                <span class="shortcut-tag tag-purple">Bypass</span>
+                            </div>
+                            <div class="shortcut-action-title">Stealth Screenshare Bridge</div>
+                            <div class="shortcut-desc-detail">Overrides forced fullscreen screenshare requirements. Share a single tab/window, a blank black screen, or a frozen frame while solving in another window.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: FAST SETUP -->
+            <div id="tabContentSetup" class="tab-pane hidden">
+                <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 0.5rem;">
+                    <div class="step-item" style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 12px;">
+                        <div class="step-badge">1</div>
+                        <div class="step-text">
+                            <strong>Download Official Extension:</strong>
+                            <div style="margin-top: 4px;">Get the pre-bundled <a href="https://github.com/akka9655/NeoExamShield/releases/download/v1.0.0/NeoExamShield.zip" class="step-link" target="_blank">NeoExamShield ZIP</a> and extract it to a folder on your computer.</div>
+                        </div>
+                    </div>
+                    <div class="step-item" style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 12px;">
+                        <div class="step-badge">2</div>
+                        <div class="step-text">
+                            <strong>Load Unpacked into Chrome:</strong>
+                            <div style="margin-top: 4px;">Open <code class="code-pill">chrome://extensions/</code> in your browser, toggle ON <strong>Developer mode</strong> (top-right corner), click <strong>Load unpacked</strong>, and select the extracted folder.</div>
+                        </div>
+                    </div>
+                    <div class="step-item" style="background: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px; border-radius: 12px;">
+                        <div class="step-badge">3</div>
+                        <div class="step-text">
+                            <strong>1-Click Key Sync:</strong>
+                            <div style="margin-top: 4px;">Sign up with your chosen 3-digit username, paste your free Gemini API key, copy your 3-digit code, and click <strong>Sync Keys</strong> in the extension popup!</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: LAB SAFETY & FAQ -->
+            <div id="tabContentSafety" class="tab-pane hidden">
+                <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 0.5rem;">
+                    <div class="lab-safety-box" style="margin-top: 0;">
+                        <div class="safety-item">
+                            <strong>📶 Can college Wi-Fi or lab admins detect this?</strong>
+                            <span>No. All AI API calls communicate directly with Google's servers (<code class="code-pill">generativelanguage.googleapis.com</code>) using encrypted TLS HTTPS on port 443. Campus firewalls only see ordinary encrypted Google traffic identical to normal search queries.</span>
+                        </div>
+                        <div class="safety-item">
+                            <strong>⚡ Free Gemini Rate Limits & Backup Keys:</strong>
+                            <span>Google gives 15 free requests/min. Add 2 to 4 free keys from Google AI Studio. If one key hits quota limits, NeoExamShield automatically switches to your next backup key with 0ms delay!</span>
+                        </div>
+                        <div class="safety-item">
+                            <strong>🛡️ Screenshare Stealth Options:</strong>
+                            <span>When the exam portal demands full desktop screenshare, use <strong>Alt + S</strong> to toggle spoofing: share only the current browser window, freeze a fake desktop frame, or feed a solid black canvas to the proctors.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modal Footer -->
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="closeGuideModal()" style="width: auto; padding: 0.5rem 1.25rem;">
+                Done
+            </button>
+        </div>
+    </dialog>
 
     <!-- ============================================== -->
     <!-- LOGIC & SCRIPTS -->
@@ -2135,31 +2289,76 @@
             }, 2500);
         }
 
-        // Toggle Fast Setup Guide on Dashboard
-        function toggleSetupGuide() {
-            const body = document.getElementById('setupGuideContent');
-            const chevron = document.getElementById('setupGuideChevron');
-            if (body.classList.contains('hidden')) {
-                body.classList.remove('hidden');
-                chevron.style.transform = 'rotate(180deg)';
-            } else {
-                body.classList.add('hidden');
-                chevron.style.transform = 'rotate(0deg)';
+        // ==========================================
+        // QUICK SETUP & SHORTCUTS MODAL LOGIC
+        // ==========================================
+        function openGuideModal(defaultTab = 'shortcuts') {
+            const modal = document.getElementById('guideModal');
+            if (modal) {
+                switchModalTab(defaultTab);
+                if (typeof modal.showModal === 'function') {
+                    modal.showModal();
+                } else {
+                    modal.setAttribute('open', '');
+                }
             }
         }
 
-        // Toggle Fast Setup Guide on Auth View
-        function toggleAuthSetupGuide() {
-            const body = document.getElementById('authSetupGuideContent');
-            const chevron = document.getElementById('authSetupGuideChevron');
-            if (body.classList.contains('hidden')) {
-                body.classList.remove('hidden');
-                chevron.style.transform = 'rotate(180deg)';
-            } else {
-                body.classList.add('hidden');
-                chevron.style.transform = 'rotate(0deg)';
+        function closeGuideModal() {
+            const modal = document.getElementById('guideModal');
+            if (modal) {
+                if (typeof modal.close === 'function') {
+                    modal.close();
+                } else {
+                    modal.removeAttribute('open');
+                }
             }
         }
+
+        function switchModalTab(tabId) {
+            ['shortcuts', 'setup', 'safety'].forEach(t => {
+                const pane = document.getElementById(`tabContent${t.charAt(0).toUpperCase() + t.slice(1)}`);
+                const btn = document.getElementById(`tabBtn${t.charAt(0).toUpperCase() + t.slice(1)}`);
+                if (pane) {
+                    if (t === tabId) {
+                        pane.classList.remove('hidden');
+                    } else {
+                        pane.classList.add('hidden');
+                    }
+                }
+                if (btn) {
+                    if (t === tabId) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                }
+            });
+        }
+
+        // Backward compatibility
+        function toggleSetupGuide() { openGuideModal('setup'); }
+        function toggleAuthSetupGuide() { openGuideModal('setup'); }
+
+        // Setup Light-Dismiss Fallback for dialog
+        document.addEventListener('DOMContentLoaded', () => {
+            const modal = document.getElementById('guideModal');
+            if (modal) {
+                modal.addEventListener('click', (event) => {
+                    if (event.target !== modal) return;
+                    const rect = modal.getBoundingClientRect();
+                    const isInside = (
+                        rect.top <= event.clientY &&
+                        event.clientY <= rect.top + rect.height &&
+                        rect.left <= event.clientX &&
+                        event.clientX <= rect.left + rect.width
+                    );
+                    if (!isInside) {
+                        closeGuideModal();
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>
