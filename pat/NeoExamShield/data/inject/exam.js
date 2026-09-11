@@ -113,18 +113,20 @@ if (typeof window.isMac === 'undefined') {
   // Initialize Random Key Press Typing Mode (Alt+X)
   window._neoExamShieldInitRandomTyping = function(codeToType) {
     if (!codeToType) return;
-    currentCode = codeToType;
+    currentCode = codeToType.replace(/\r\n/g, '\n').trim();
     charIndex = 0;
     isRandomTypingActive = true;
     lastQuestionIdentifier = getQuestionIdentifier();
     editor = findAnswerEditor();
     if (editor) {
       try {
+        editor.setValue('', 1);
+        editor.clearSelection();
         editor.focus();
         editor.navigateFileEnd();
       } catch(e) {}
     }
-    console.log('[exam.js] Random Key Typing Mode INITIALIZED. Press any keys on keyboard to type code!');
+    console.log('[exam.js] Random Key Typing Mode INITIALIZED. Press any keys on keyboard to reveal code letter by letter!');
   };
 
   // Keyboard listener for Alt+C (stop) and Random Key Typing
@@ -151,8 +153,11 @@ if (typeof window.isMac === 'undefined') {
       if (event.ctrlKey || event.metaKey) {
         return; // Allow standard shortcuts like Ctrl+C
       }
+      if (/^F\d+$/.test(key) || ['PageUp', 'PageDown', 'Home', 'End', 'Insert'].includes(key)) {
+        return;
+      }
 
-      // Intercept the random keypress and type the true code
+      // Intercept the random keypress and reveal exactly 1 letter of the solution
       event.preventDefault();
       event.stopPropagation();
 
@@ -160,28 +165,19 @@ if (typeof window.isMac === 'undefined') {
       if (!editor) return;
 
       if (charIndex < currentCode.length) {
-        let step = 1;
-        // Group newlines and subsequent indentation together for smooth natural code writing
-        if (currentCode[charIndex] === '\n') {
-          step = 1;
-          while (charIndex + step < currentCode.length && 
-                (currentCode[charIndex + step] === ' ' || currentCode[charIndex + step] === '\t')) {
-            step++;
-          }
-        } else {
-          // Advance 1-2 characters per random keypress
-          step = Math.min(2, currentCode.length - charIndex);
-        }
+        // Reveal exactly one character per keypress
+        charIndex++;
+        const codeSlice = currentCode.slice(0, charIndex);
 
-        const chunk = currentCode.slice(charIndex, charIndex + step);
         try {
-          editor.insert(chunk);
-        } catch(e) {
-          // Fallback if editor.insert fails
-          editor.setValue(editor.getValue() + chunk, 1);
+          editor.setValue(codeSlice, 1);
+          editor.clearSelection();
           editor.navigateFileEnd();
+        } catch(e) {
+          try {
+            editor.insert(currentCode[charIndex - 1]);
+          } catch(err) {}
         }
-        charIndex += step;
 
         if (charIndex >= currentCode.length) {
           isRandomTypingActive = false;

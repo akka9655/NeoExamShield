@@ -655,6 +655,7 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
             } else {
                 cleanedCode = cleanedCode.replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
             }
+            cleanedCode = cleanedCode.replace(/\r\n/g, '\n').trim();
 
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
