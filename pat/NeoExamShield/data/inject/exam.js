@@ -6,6 +6,7 @@ if (typeof window.isMac === 'undefined') {
 
 // Auto-answering and Random Key Press Typing mechanism
 (function () {
+  const console = { log: () => {}, warn: () => {}, error: () => {}, info: () => {}, debug: () => {} };
   let editor;
   let currentCode = "";
   let charIndex = 0;
@@ -49,7 +50,6 @@ if (typeof window.isMac === 'undefined') {
   // Stop typing mode and clear current question buffer
   window._neoStopTyping = function() {
     if (isRandomTypingActive || currentCode) {
-      console.log('[exam.js] Stopping random key typing mode');
       isRandomTypingActive = false;
       currentCode = "";
       charIndex = 0;
@@ -60,7 +60,6 @@ if (typeof window.isMac === 'undefined') {
   function checkForQuestionChange() {
     const currentQ = getQuestionIdentifier();
     if (currentQ && lastQuestionIdentifier && currentQ !== lastQuestionIdentifier) {
-      console.log('[exam.js] Question switched, automatically stopping typing mode');
       window._neoStopTyping();
     }
     if (currentQ) {
@@ -173,7 +172,6 @@ if (typeof window.isMac === 'undefined') {
     if (!codeToType) return;
     window._neoStopTyping(); // Stop any pending random typing
     const cleanCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
-    console.log('[exam.js] Instant code insertion called, length:', cleanCode.length);
     const found = findAnswerEditor();
     if (found) {
       try {
@@ -181,12 +179,7 @@ if (typeof window.isMac === 'undefined') {
         editor.setValue(cleanCode, 1);
         editor.clearSelection();
         editor.navigateFileEnd();
-        console.log('[exam.js] Code inserted instantly into editor');
-      } catch (error) {
-        console.error('[exam.js] Error setting code:', error);
-      }
-    } else {
-      console.error('[exam.js] No editor found for code');
+      } catch (error) {}
     }
   };
 
@@ -206,7 +199,6 @@ if (typeof window.isMac === 'undefined') {
         editor.navigateFileEnd();
       } catch(e) {}
     }
-    console.log('[exam.js] Random Key Typing Mode INITIALIZED. Press any keys on keyboard to reveal code letter by letter!');
   };
 
   // Keyboard listener for Alt+C (stop) and Random Key Typing
@@ -218,39 +210,32 @@ if (typeof window.isMac === 'undefined') {
       event.preventDefault();
       event.stopPropagation();
       window._neoStopTyping();
-      window.dispatchEvent(new CustomEvent('neoTypingStopped'));
       return;
     }
 
-    // If Random Typing Mode is active, intercept any typing keystrokes
-    if (isRandomTypingActive && currentCode) {
-      // Ignore alone modifier keys so hotkeys work
-      const key = event.key;
-      if (key === 'Alt' || key === 'Control' || key === 'Shift' || key === 'Meta' || 
-          key === 'CapsLock' || key === 'Escape' || (event.altKey && event.code !== 'KeyX')) {
-        return;
+    // Process typing only if mode is active and not holding modifier keys (except Shift)
+    if (!isRandomTypingActive || !currentCode) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    // Ignore standalone modifier keys
+    const ignoredKeys = ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Escape'];
+    if (ignoredKeys.includes(event.key)) return;
+
+    // Reveal one character from clean solution code on any keypress
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (charIndex < currentCode.length) {
+      charIndex++;
+      const partialCode = currentCode.substring(0, charIndex);
+
+      if (!editor) {
+        editor = findAnswerEditor();
       }
-      if (event.ctrlKey || event.metaKey) {
-        return; // Allow standard shortcuts like Ctrl+C
-      }
-      if (/^F\d+$/.test(key) || ['PageUp', 'PageDown', 'Home', 'End', 'Insert'].includes(key)) {
-        return;
-      }
 
-      // Intercept the random keypress and reveal exactly 1 letter of the solution
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (!editor) editor = findAnswerEditor();
-      if (!editor) return;
-
-      if (charIndex < currentCode.length) {
-        // Reveal exactly one character per keypress
-        charIndex++;
-        const codeSlice = currentCode.slice(0, charIndex);
-
+      if (editor) {
         try {
-          editor.setValue(codeSlice, 1);
+          editor.setValue(partialCode, 1);
           editor.clearSelection();
           editor.navigateFileEnd();
         } catch(e) {
@@ -261,7 +246,6 @@ if (typeof window.isMac === 'undefined') {
 
         if (charIndex >= currentCode.length) {
           isRandomTypingActive = false;
-          console.log('[exam.js] Random key typing complete!');
           window.dispatchEvent(new CustomEvent('neoTypingComplete'));
         }
       } else {

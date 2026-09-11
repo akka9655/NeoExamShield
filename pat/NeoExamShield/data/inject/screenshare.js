@@ -61,16 +61,14 @@ function bypassRestrictions() {
         window.addEventListener('beforeunload', blockBeforeUnload, true);
     } catch (e) {}
     
-    // Override addEventListener to block beforeunload handlers safely
+    // Override addEventListener to block beforeunload and unload handlers safely
     try {
         const originalAddEventListener = EventTarget.prototype.addEventListener;
         if (originalAddEventListener) {
             const safeAddEventListener = function(type, listener) {
-                // If beforeunload is being added on window or document, safely drop it
-                if (type === 'beforeunload') {
-                    if (this === window || this === document || !this || (typeof Window !== 'undefined' && this instanceof Window)) {
-                        return;
-                    }
+                // Completely drop unload and beforeunload listeners to prevent permissions policy violations
+                if (type === 'unload' || type === 'beforeunload') {
+                    return;
                 }
                 try {
                     return originalAddEventListener.apply(this || window, arguments);
@@ -123,7 +121,7 @@ function bypassRestrictions() {
         }
     } catch (e) {}
     
-    // Override onbeforeunload property setter safely
+    // Override onbeforeunload and onunload property setters safely
     try {
         let _onbeforeunload = null;
         Object.defineProperty(window, 'onbeforeunload', {
@@ -135,6 +133,20 @@ function bypassRestrictions() {
                 _onbeforeunload = val;
             },
             configurable: true, // CRITICAL: must remain configurable so Zone.js can redefine/wrap it!
+            enumerable: true
+        });
+    } catch (e) {}
+
+    try {
+        let _onunload = null;
+        Object.defineProperty(window, 'onunload', {
+            get: function() {
+                return null;
+            },
+            set: function(val) {
+                _onunload = val;
+            },
+            configurable: true,
             enumerable: true
         });
     } catch (e) {}

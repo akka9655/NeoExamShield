@@ -9,24 +9,29 @@ const shortcutStates = {
 // Request blocking mechanism to prevent multiple simultaneous API requests
 let isRequestInProgress = false;
 let requestTimeout = null;
+let lastRequestTimestamp = 0;
 
 function canMakeRequest() {
+    // If more than 4 seconds have elapsed since last request, auto-unblock
+    if (isRequestInProgress && (Date.now() - lastRequestTimestamp > 4000)) {
+        isRequestInProgress = false;
+    }
     return !isRequestInProgress;
 }
 
 function blockRequests() {
     isRequestInProgress = true;
+    lastRequestTimestamp = Date.now();
     
     // Clear any existing timeout
     if (requestTimeout) {
         clearTimeout(requestTimeout);
     }
     
-    // Set timeout to unblock after 15 seconds
+    // Set timeout to unblock after 6 seconds
     requestTimeout = setTimeout(() => {
         isRequestInProgress = false;
-        console.log('[Request Block] Unblocked after 15 seconds timeout');
-    }, 15000);
+    }, 6000);
 }
 
 function unblockRequests() {
@@ -1669,6 +1674,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
 
             } catch (error) {
                 console.error("Query processing error:", error);
+                unblockRequests();
                 
                 removeExistingToast(sender.tab.id);
                 // Show a generic error toast only if the error wasn't already handled by queryRequest

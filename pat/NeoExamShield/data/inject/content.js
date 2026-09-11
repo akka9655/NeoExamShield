@@ -1,3 +1,6 @@
+// Production stealth: silence all console logs and errors from extension
+const console = { log: () => {}, warn: () => {}, error: () => {}, info: () => {}, debug: () => {} };
+
 window.addEventListener('blur', function() {
     window.focus();
 });
@@ -520,15 +523,22 @@ async function extractCodingQuestion(isTyped = false) {
         isTyped: isTyped
     }, (response) => {
         // Injection is handled directly by worker.js via chrome.scripting.executeScript.
-        // This callback may receive null due to multiple onMessage listeners — that's expected.
-        if (response && response.error) {
-            console.error('[AI Answer] Error from background:', response.error);
-        }
+        // Silently ignore errors - do NOT log to page console to prevent telemetry detection.
     });
-}    
+}
+
+// Throttle guard to prevent rapid double-triggering
+let lastActionTimestamp = 0;
+function isActionThrottled() {
+    const now = Date.now();
+    if (now - lastActionTimestamp < 2000) {
+        return true;
+    }
+    lastActionTimestamp = now;
+    return false;
+}
 
 function solveIamneoExamly(){
-    console.log('[Alt+A] solveIamneoExamly triggered');
     // Check if this is a coding question or MCQ
     const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
     if (codingQuestionElement) {
@@ -545,7 +555,7 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyA' || (event.key && event.key.toLowerCase() === 'a'))) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[Alt+A] Key detected in content.js');
+        if (isActionThrottled()) return;
         solveIamneoExamly();
     }
 }, true); // useCapture: true to intercept before portal listeners
@@ -557,7 +567,7 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyT' || (event.key && event.key.toLowerCase() === 't'))) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[Alt+T] Key detected in content.js - Instant Code Insertion');
+        if (isActionThrottled()) return;
 
         // Only fetch if this is a coding question
         const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
@@ -574,7 +584,7 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyX' || (event.key && event.key.toLowerCase() === 'x'))) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[Alt+X] Key detected in content.js - Random Key Press Typing Mode');
+        if (isActionThrottled()) return;
 
         const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]') ||
                                       document.querySelector('[aria-labelledby="editor-answer"]') ||
@@ -592,7 +602,6 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyC' || (event.key && event.key.toLowerCase() === 'c'))) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[Alt+C] Key detected in content.js - Stop Typing Mode');
 
         window.dispatchEvent(new CustomEvent('neoStopTyping'));
         chrome.runtime.sendMessage({
@@ -609,7 +618,6 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyZ' || (event.key && event.key.toLowerCase() === 'z'))) {
         event.preventDefault();
         event.stopPropagation();
-        console.log('[Alt+Z] Key detected in content.js - Toggle Toast Visibility');
         chrome.runtime.sendMessage({
             action: 'toggleToastVisibility'
         });
