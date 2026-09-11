@@ -1017,7 +1017,9 @@
                     const input = document.getElementById(inputId);
                     input.value = text.trim();
                     input.focus();
-                    showToast("✓ API Key pasted successfully!", "success", 2000);
+                    const id = inputId.replace('apiKey-', '');
+                    showToast("✓ Pasted! Auto-testing connection...", "info", 2000);
+                    testSingleKey(id);
                 } else {
                     showToast("Clipboard is empty. Copy your API key first.", "info");
                 }
@@ -1028,6 +1030,16 @@
                 input.select();
                 showToast("Clipboard access blocked. Please press Ctrl+V or long-press & Paste.", "info", 4000);
             }
+        }
+
+        function handleManualPaste(e, id) {
+            setTimeout(() => {
+                const input = document.getElementById(`apiKey-${id}`);
+                if (input && input.value.trim().length > 0) {
+                    showToast("Pasted! Auto-testing connection...", "info", 2000);
+                    testSingleKey(id);
+                }
+            }, 100);
         }
 
         function togglePasswordVisibility(fieldId, btn) {
@@ -1333,7 +1345,7 @@
                 <div class="form-group">
                     <label class="form-label">API Key</label>
                     <div class="input-wrapper">
-                        <input type="text" id="apiKey-${id}" class="form-control api-input" placeholder="Paste your API key here" value="${apiKey}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                        <input type="text" id="apiKey-${id}" class="form-control api-input" placeholder="Paste your API key here" value="${apiKey}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" onpaste="handleManualPaste(event, ${id})">
                         <div class="input-actions">
                             <button type="button" class="btn-paste-pill" onclick="pasteFromClipboard('apiKey-${id}')" title="Click to paste key from clipboard">
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
@@ -1348,7 +1360,7 @@
 
                 <div class="form-group" style="margin-bottom: 0.75rem;">
                     <label class="form-label">Model Identifier</label>
-                    <input type="text" id="model-${id}" class="form-control" placeholder="e.g. gemini-2.5-flash" value="${modelName}">
+                    <input type="text" id="model-${id}" class="form-control" placeholder="e.g. gemini-3.5-flash" value="${modelName}">
                 </div>
 
                 <div style="display: flex; gap: 8px; margin-top: 0.75rem;">
