@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     const { username, password, action } = req.body || {};
-    if (!username) return res.status(400).json({ error: 'Roll Number is required' });
+    if (!username) return res.status(400).json({ error: 'Username is required' });
     if (!password) return res.status(400).json({ error: 'Password is required' });
 
     try {
@@ -38,6 +38,7 @@ export default async function handler(req, res) {
             let attempts = 0;
             while (attempts < 50) {
                 staticCode = Math.floor(100 + Math.random() * 900).toString();
+                if (staticCode === '000' || staticCode === '785') continue;
                 const exists = await kv.get(`code:${staticCode}`);
                 if (!exists) break;
                 attempts++;
