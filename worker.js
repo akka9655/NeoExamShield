@@ -690,6 +690,41 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
     }
 }
 
+// Smart API key tracking for fast switching & Gemini free-tier optimization
+const keyCooldowns = new Map(); // apiKey -> timestamp until which it's on cooldown
+let preferredKey = null; // currently active, fast-responding key
+
+function getPrioritizedConfigs(configs) {
+    if (!configs || configs.length <= 1) return configs;
+    const now = Date.now();
+    const ready = [];
+    const cooling = [];
+
+    for (const cfg of configs) {
+        const until = keyCooldowns.get(cfg.apiKey) || 0;
+        if (now >= until) {
+            ready.push(cfg);
+        } else {
+            cooling.push({ cfg, until });
+        }
+    }
+
+    // Sort cooling keys by shortest remaining wait time
+    cooling.sort((a, b) => a.until - b.until);
+    const sortedCooling = cooling.map(c => c.cfg);
+
+    // Prioritize the preferred working key first among ready keys
+    if (preferredKey) {
+        const prefIdx = ready.findIndex(c => c.apiKey === preferredKey);
+        if (prefIdx > 0) {
+            const [pk] = ready.splice(prefIdx, 1);
+            ready.unshift(pk);
+        }
+    }
+
+    return [...ready, ...sortedCooling];
+}
+
 // Enhanced queryRequest function with comprehensive error handling
 // Returns either:
 // - String: successful response text
@@ -712,13 +747,35 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
         const customAPIConfigs = await getCustomAPIConfigs();
         
         if (customAPIConfigs.length > 0) {
+            const prioritizedConfigs = getPrioritizedConfigs(customAPIConfigs);
             let lastResult = null;
-            for (const config of customAPIConfigs) {
+            
+            for (const config of prioritizedConfigs) {
                 const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config, image);
                 if (typeof result === 'string') {
+                    // Fast success: remember working key and clear any cooldown
+                    preferredKey = config.apiKey;
+                    keyCooldowns.delete(config.apiKey);
                     unblockRequests();
                     return result; // Success
                 }
+                
+                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 45s (free tier 15 RPM)
+                const isRateLimit = result && (
+                    result.status === 429 || 
+                    (result.detailedInfo && result.detailedInfo.toLowerCase().includes('quota')) ||
+                    (result.detailedInfo && result.detailedInfo.toLowerCase().includes('resource_exhausted'))
+                );
+                if (isRateLimit) {
+                    keyCooldowns.set(config.apiKey, Date.now() + 45000);
+                } else if (result && result.status === 400) {
+                    keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for invalid key
+                }
+
+                if (preferredKey === config.apiKey) {
+                    preferredKey = null;
+                }
+
                 console.warn("API Key failed, falling back to next...", result);
                 lastResult = result;
             }
@@ -1058,7 +1115,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
                 
                 const generationConfig = {
                     temperature: 0.1,
-                    maxOutputTokens: isMCQ ? 150 : 2048
+                    maxOutputTokens: isMCQ ? 60 : 2048
                 };
                 // Disable hidden thinking tokens on 3.5-flash to save 85% tokens and speed up response
                 if (!googleModel.toLowerCase().includes('lite')) {
@@ -1133,6 +1190,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
             return {
                 error: `API request failed: ${response.status}`,
                 errorType: 'api',
+                status: response.status,
                 detailedInfo: errorData.error?.message || errorData.message || `HTTP ${response.status}: ${response.statusText}`
             };
         }

@@ -229,35 +229,85 @@ function extractQuestionCodeAndOptions() {
     };
 }
 
-// Async function to handle question, code, and options extraction
+// Async function to handle question, code, and options extraction with full image & diagram support
 async function handleQuestionExtraction() {
-    const { question, code, options } = extractQuestionCodeAndOptions();
+    // 1. Extract question text
+    const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
+    const questionText = questionElement ? htmlToText(questionElement) : '';
 
-    // Extract all diagrams and images from the entire question and options area
-    const questionContainer = document.querySelector('div[aria-labelledby="question-answer"]') || 
-                              document.querySelector('testtaking-question') || 
-                              document.querySelector('div[aria-labelledby="question-data"]') || 
-                              document.body;
+    // 2. Extract code
+    const codeLines = [];
+    const codeElements = document.querySelectorAll('.ace_layer.ace_text-layer .ace_line');
+    codeElements.forEach(line => codeLines.push(line.innerText.trim()));
+    const codeText = codeLines.length > 0 ? codeLines.join('\n') : null;
 
-    const images = await extractImagesFromElement(questionContainer);
+    // 3. Extract question diagrams first
+    const allImages = [];
+    let imageCounter = 1;
+    let visualGuide = [];
 
-    if (!question && !options && images.length === 0) {
+    if (questionElement) {
+        const qImages = await extractImagesFromElement(questionElement);
+        for (const img of qImages) {
+            allImages.push(img);
+            visualGuide.push(`[Image ${imageCounter++}: Question diagram]`);
+        }
+    }
+
+    // 4. Extract options and option images specifically
+    const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]');
+    const optionsText = [];
+
+    for (let index = 0; index < optionsElements.length; index++) {
+        const opt = optionsElements[index];
+        const rawText = htmlToText(opt);
+        const optImages = await extractImagesFromElement(opt);
+        
+        let label = `Option ${index + 1}`;
+        if (optImages.length > 0) {
+            const startRef = imageCounter;
+            for (const img of optImages) {
+                allImages.push(img);
+                visualGuide.push(`[Image ${imageCounter++}: Choice for ${label}]`);
+            }
+            const refText = optImages.length === 1 ? `Image ${startRef}` : `Images ${startRef}-${imageCounter - 1}`;
+            optionsText.push(`${label} (Visual: see ${refText}): ${rawText || '(Image Option)'}`);
+        } else {
+            optionsText.push(`${label}: ${rawText}`);
+        }
+    }
+
+    // Fallback: If no images found yet, check overall container
+    if (allImages.length === 0) {
+        const questionContainer = document.querySelector('div[aria-labelledby="question-answer"]') || 
+                                  document.querySelector('testtaking-question') || 
+                                  document.body;
+        const fallbackImages = await extractImagesFromElement(questionContainer);
+        allImages.push(...fallbackImages);
+    }
+
+    if (!questionText && optionsText.length === 0 && allImages.length === 0) {
         return;
     }
 
-    console.log('Question:', question);
-    console.log('Code:\n', code ? code : 'No code available');
-    console.log('Options:\n', options);
-    console.log('[MCQ] Diagrams/Images extracted:', images.length);
+    let finalQuestion = questionText;
+    if (visualGuide.length > 0) {
+        finalQuestion += `\n\n[Visual Attachments: ${visualGuide.join(', ')}]`;
+    }
+
+    console.log('Question:', finalQuestion);
+    console.log('Code:\n', codeText ? codeText : 'No code available');
+    console.log('Options:\n', optionsText.join('\n'));
+    console.log('[MCQ] Total Diagrams/Option Images extracted:', allImages.length);
 
     // Send the extracted data to background.js
     // The clicking will be handled by the clickMCQOption message handler
     chrome.runtime.sendMessage({
         action: 'extractData',
-        question: question,
-        code: code,
-        options: options,
-        images: images,
+        question: finalQuestion,
+        code: codeText,
+        options: optionsText.join('\n'),
+        images: allImages,
         isMCQ: true
     });
 }
@@ -771,14 +821,30 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
             } else {
                 // Original logic for other platforms (Examly)
-                const optionMatch = request.response.match(/(?:options?\s*)?(\d+)\.?/i);
+                const optionMatch = request.response.match(/(?:options?\s*)?([A-D]|\d+)\.?/i);
                 if (optionMatch) {
-                    const optionNumber = parseInt(optionMatch[1])-1;
-                    // Use the same selector as the primary Iamneo answer flow.
-                    const answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`);
+                    let optionNumber;
+                    if (isNaN(optionMatch[1])) {
+                        optionNumber = optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
+                    } else {
+                        optionNumber = parseInt(optionMatch[1]) - 1;
+                    }
+                    
+                    // Try multiple possible Examly option selectors
+                    let answerElement = document.querySelector(`#tt-option-${optionNumber} > label > span.checkmark1`) ||
+                                        document.querySelector(`#tt-option-${optionNumber} input`) ||
+                                        document.querySelector(`#tt-option-${optionNumber}`);
+                    
+                    if (!answerElement) {
+                        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"]');
+                        if (allOpts.length > optionNumber && optionNumber >= 0) {
+                            answerElement = allOpts[optionNumber].querySelector('label, input, span.checkmark1') || allOpts[optionNumber];
+                        }
+                    }
                     
                     if (answerElement) {
                         answerElement.dispatchEvent(new Event("click", { bubbles: true }));
+                        answerElement.click();
                         console.log(`Option element ${optionNumber + 1} clicked successfully`);
                     } else {
                         chrome.runtime.sendMessage({
