@@ -567,6 +567,70 @@ document.addEventListener('keydown', (event) => {
     }
 }, true); // useCapture: true to intercept before portal listeners
 
+// Alt+X (Option+X on macOS): Random Key Press Typing Mode (Hacker Typer mode)
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyX' || (event.key && event.key.toLowerCase() === 'x'))) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[Alt+X] Key detected in content.js - Random Key Press Typing Mode');
+
+        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]') ||
+                                      document.querySelector('[aria-labelledby="editor-answer"]') ||
+                                      document.querySelector('.ace_editor');
+        if (!codingQuestionElement) return;
+
+        extractCodingQuestion(true); // Random key press typing mode
+    }
+}, true); // useCapture: true to intercept before portal listeners
+
+// Alt+C (Option+C on macOS): Stop/Off Random Key Typing Mode
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyC' || (event.key && event.key.toLowerCase() === 'c'))) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[Alt+C] Key detected in content.js - Stop Typing Mode');
+
+        window.dispatchEvent(new CustomEvent('neoStopTyping'));
+        chrome.runtime.sendMessage({
+            action: 'showCustomToast',
+            message: 'Typing Mode Stopped'
+        });
+    }
+}, true); // useCapture: true to intercept before portal listeners
+
+// Alt+Z (Option+Z on macOS): Toggle Toast Visibility (Color Toast ON/OFF)
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyZ' || (event.key && event.key.toLowerCase() === 'z'))) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[Alt+Z] Key detected in content.js - Toggle Toast Visibility');
+        chrome.runtime.sendMessage({
+            action: 'toggleToastVisibility'
+        });
+    }
+}, true); // useCapture: true to intercept before portal listeners
+
+// Listen for typing events from exam.js
+window.addEventListener('neoTypingComplete', () => {
+    chrome.runtime.sendMessage({
+        action: 'showCustomToast',
+        message: 'Code Typing Complete!'
+    });
+});
+
+window.addEventListener('neoTypingStopped', () => {
+    chrome.runtime.sendMessage({
+        action: 'showCustomToast',
+        message: 'Typing Mode Stopped'
+    });
+});
+
 // Add event listener for Alt+O to toggle toast opacity.
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;

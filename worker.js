@@ -659,40 +659,58 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
 
-            // Inject directly and instantly into the Ace editor (no typing simulator delay)
-            chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                func: function(code) {
-                    if (typeof window._neopassStartTyping === 'function') {
-                        window._neopassStartTyping(code);
-                    }
-                    var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-                    if (answerEl && typeof ace !== 'undefined') {
-                        try {
-                            var ed = ace.edit(answerEl);
-                            ed.setValue(code, 1);
-                            ed.clearSelection();
-                            ed.navigateFileEnd();
-                        } catch(e) {}
-                    } else if (typeof ace !== 'undefined') {
-                        var editors = document.querySelectorAll('.ace_editor');
-                        editors.forEach(function(el) {
+            // If isTyped is true (Alt+X), initialize Random Key Press Typing Mode
+            if (isTyped) {
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: function(code) {
+                        if (typeof window._neoExamShieldInitRandomTyping === 'function') {
+                            window._neoExamShieldInitRandomTyping(code);
+                        }
+                    },
+                    args: [cleanedCode],
+                    world: 'MAIN'
+                }).catch(function(err) {
+                    console.error('[worker.js] executeScript typing init failed:', err);
+                });
+                showToast(tabId, 'Typing Mode Ready: Type any keys to write code');
+            } else {
+                // Alt+T: Fast Instant direct code insertion into Ace editor
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: function(code) {
+                        if (typeof window._neopassStartTyping === 'function') {
+                            window._neopassStartTyping(code);
+                        }
+                        var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
+                        if (answerEl && typeof ace !== 'undefined') {
                             try {
-                                var ed = ace.edit(el);
-                                if (!ed.getReadOnly()) {
-                                    ed.setValue(code, 1);
-                                    ed.clearSelection();
-                                    ed.navigateFileEnd();
-                                }
+                                var ed = ace.edit(answerEl);
+                                ed.setValue(code, 1);
+                                ed.clearSelection();
+                                ed.navigateFileEnd();
                             } catch(e) {}
-                        });
-                    }
-                },
-                args: [cleanedCode],
-                world: 'MAIN'
-            }).catch(function(err) {
-                console.error('[worker.js] executeScript failed:', err);
-            });
+                        } else if (typeof ace !== 'undefined') {
+                            var editors = document.querySelectorAll('.ace_editor');
+                            editors.forEach(function(el) {
+                                try {
+                                    var ed = ace.edit(el);
+                                    if (!ed.getReadOnly()) {
+                                        ed.setValue(code, 1);
+                                        ed.clearSelection();
+                                        ed.navigateFileEnd();
+                                    }
+                                } catch(e) {}
+                            });
+                        }
+                    },
+                    args: [cleanedCode],
+                    world: 'MAIN'
+                }).catch(function(err) {
+                    console.error('[worker.js] executeScript failed:', err);
+                });
+                showToast(tabId, 'Code Solution Inserted');
+            }
 
             // Clean up spinner toast
             removeExistingToast(tabId);
@@ -2041,8 +2059,21 @@ function showOpacityLevelToast(tabId, message) {
     });
 }
 
+// Helper to check if toasts are globally enabled (toggled via Alt+Z)
+async function areToastsEnabled() {
+    return new Promise((resolve) => {
+        chrome.storage.local.get(['toastsEnabled'], (result) => {
+            resolve(result.toastsEnabled !== false); // default true
+        });
+    });
+}
+
 // Update existing showToast function to use Neo PAT portal theme
-async function showToast(tabId, message, isError = false, detailedInfo = '') {
+async function showToast(tabId, message, isError = false, detailedInfo = '', forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
@@ -2248,6 +2279,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true; // Keep the message channel open for async response
     }
 
+    if (message.action === 'toggleToastVisibility') {
+        (async () => {
+            const enabled = await areToastsEnabled();
+            const newState = !enabled;
+            await chrome.storage.local.set({ toastsEnabled: newState });
+            showToast(sender.tab.id, newState ? 'Toasts: ON' : 'Toasts: OFF (Silent)', false, '', true);
+            sendResponse({ success: true, enabled: newState });
+        })();
+        return true;
+    }
+
+    if (message.action === 'showCustomToast') {
+        showToast(sender.tab.id, message.message);
+        sendResponse({ success: true });
+        return true;
+    }
 });
 
 // Initialize opacity level from storage on startup
@@ -2609,7 +2656,11 @@ async function loadNptelDataset() {
 loadNptelDataset();
 
 // Update showMCQToast to use Neo PAT portal theme (top, compact, native Examly header style)
-async function showMCQToast(tabId, message, detailedInfo = '') {
+async function showMCQToast(tabId, message, detailedInfo = '', forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
@@ -2852,7 +2903,11 @@ async function showNPTELToast(tabId, message, isError = false, detailedInfo = ''
 }
 
 // Show a spinner toast while AI query is being processed (Neo PAT portal theme)
-async function showSpinnerToast(tabId, message = 'Processing your request...') {
+async function showSpinnerToast(tabId, message = 'Processing your request...', forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
