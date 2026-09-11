@@ -5,100 +5,175 @@ if (typeof isMac === 'undefined') {
             navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
 }
 
-// Lists of events to intercept
+// Lists of events to intercept safely
 const windowEvents = [
     "blur", 
     "focus", 
-    "beforeunload", 
-    "pagehide", 
-    "unload", 
-    "popstate", 
-    "resize", 
     "pagehide", 
     'lostpointercapture', 
-    "fullscreenchange", 
     "visibilitychange"
 ];
 
 const documentEvents = [
-    "paste", 
-    "onpaste", 
     "visibilitychange", 
     "webkitvisibilitychange"
 ];
 
 // Store original property descriptors for restoration
-const originalVisibilityState = Object.getOwnPropertyDescriptor(document, 'visibilityState');
-const originalWebkitVisibilityState = Object.getOwnPropertyDescriptor(document, "webkitVisibilityState");
-const originalHidden = Object.getOwnPropertyDescriptor(document, "hidden");
+let originalVisibilityState, originalWebkitVisibilityState, originalHidden;
+try {
+    originalVisibilityState = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    originalWebkitVisibilityState = Object.getOwnPropertyDescriptor(document, "webkitVisibilityState");
+    originalHidden = Object.getOwnPropertyDescriptor(document, "hidden");
+} catch (e) {}
 
-// Event handler to prevent default behavior
+// Event handler to prevent default tracking behavior safely
 const eventHandler = (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation();
+    try {
+        // Never prevent focus/blur on actual form inputs, buttons, or code editor
+        if (event.type === 'blur' || event.type === 'focus') {
+            if (event.target !== window && event.target !== document) {
+                return;
+            }
+        } else {
+            event.preventDefault();
+        }
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+    } catch (e) {}
 };
 
 // Main function to bypass browser restrictions
 function bypassRestrictions() {
-    // Aggressively block beforeunload popup
+    // Aggressively block beforeunload popup safely
     const blockBeforeUnload = (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        delete e['returnValue'];
+        try {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            delete e['returnValue'];
+            e.returnValue = undefined;
+        } catch (err) {}
     };
     
     // Add our handler with highest priority (capture phase)
-    window.addEventListener('beforeunload', blockBeforeUnload, true);
+    try {
+        window.addEventListener('beforeunload', blockBeforeUnload, true);
+    } catch (e) {}
     
-    // Override addEventListener to block beforeunload handlers
-    const originalAddEventListener = EventTarget.prototype.addEventListener;
-    EventTarget.prototype.addEventListener = function(type, listener, options) {
-        if (type === 'beforeunload') {
-            return; // Completely ignore beforeunload listeners
+    // Override addEventListener to block beforeunload handlers safely
+    try {
+        const originalAddEventListener = EventTarget.prototype.addEventListener;
+        if (originalAddEventListener) {
+            const safeAddEventListener = function(type, listener) {
+                // If beforeunload is being added on window or document, safely drop it
+                if (type === 'beforeunload') {
+                    if (this === window || this === document || !this || (typeof Window !== 'undefined' && this instanceof Window)) {
+                        return;
+                    }
+                }
+                try {
+                    return originalAddEventListener.apply(this || window, arguments);
+                } catch (e) {
+                    try {
+                        return originalAddEventListener.call(this || window, type, listener, arguments[2]);
+                    } catch (err) {
+                        // Suppress error to avoid throwing from wrapper and leaking into stack traces
+                        return;
+                    }
+                }
+            };
+
+            // Spoof toString to return native code so anti-cheat / inspector won't detect tampering
+            try {
+                Object.defineProperty(safeAddEventListener, 'toString', {
+                    value: function toString() { return 'function addEventListener() { [native code] }'; },
+                    writable: true,
+                    configurable: true
+                });
+            } catch (e) {}
+
+            // Set name and length to match native EventTarget.prototype.addEventListener
+            try {
+                Object.defineProperty(safeAddEventListener, 'name', {
+                    value: 'addEventListener',
+                    configurable: true
+                });
+            } catch (e) {}
+
+            // Copy all properties and symbols from originalAddEventListener (Zone.js symbols, etc.)
+            try {
+                const descriptors = Object.getOwnPropertyDescriptors(originalAddEventListener);
+                for (const key of Object.keys(descriptors)) {
+                    if (key !== 'name' && key !== 'length' && key !== 'prototype') {
+                        try {
+                            Object.defineProperty(safeAddEventListener, key, descriptors[key]);
+                        } catch (e) {}
+                    }
+                }
+                const symbols = Object.getOwnPropertySymbols(originalAddEventListener);
+                for (const sym of symbols) {
+                    try {
+                        safeAddEventListener[sym] = originalAddEventListener[sym];
+                    } catch (e) {}
+                }
+            } catch (e) {}
+
+            EventTarget.prototype.addEventListener = safeAddEventListener;
         }
-        return originalAddEventListener.call(this, type, listener, options);
-    };
+    } catch (e) {}
     
-    // Override onbeforeunload property setter
-    Object.defineProperty(window, 'onbeforeunload', {
-        set: function(val) {
-            // Silently ignore attempts to set onbeforeunload
-        },
-        get: function() {
-            return null;
-        },
-        configurable: false
-    });
+    // Override onbeforeunload property setter safely
+    try {
+        let _onbeforeunload = null;
+        Object.defineProperty(window, 'onbeforeunload', {
+            get: function() {
+                return null;
+            },
+            set: function(val) {
+                // Silently accept without error
+                _onbeforeunload = val;
+            },
+            configurable: true, // CRITICAL: must remain configurable so Zone.js can redefine/wrap it!
+            enumerable: true
+        });
+    } catch (e) {}
     
-    // Prevent window events from firing
+    // Prevent tracking window events from firing
     windowEvents.forEach(eventName => {
-        // Skip unload and beforeunload events
-        if (eventName !== 'unload' && eventName !== 'beforeunload') {
+        try {
             window.addEventListener(eventName, eventHandler, true);
-        }
+        } catch (e) {}
     });
 
-    // Prevent document events from firing
+    // Prevent tracking document events from firing
     documentEvents.forEach(eventName => {
-        document.addEventListener(eventName, eventHandler, true);
+        try {
+            document.addEventListener(eventName, eventHandler, true);
+        } catch (e) {}
     });
 
-    // Override visibility state properties
-    Object.defineProperty(document, "visibilityState", {
-        get: () => "visible",
-        configurable: true
-    });
+    // Override visibility state properties safely
+    try {
+        Object.defineProperty(document, "visibilityState", {
+            get: () => "visible",
+            configurable: true
+        });
+    } catch (e) {}
 
-    Object.defineProperty(document, 'webkitVisibilityState', {
-        get: () => "visible",
-        configurable: true
-    });
+    try {
+        Object.defineProperty(document, 'webkitVisibilityState', {
+            get: () => "visible",
+            configurable: true
+        });
+    } catch (e) {}
 
-    Object.defineProperty(document, "hidden", {
-        get: () => false,
-        configurable: true
-    });
+    try {
+        Object.defineProperty(document, "hidden", {
+            get: () => false,
+            configurable: true
+        });
+    } catch (e) {}
 }
 
 async function validateProAccess() {
