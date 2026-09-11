@@ -89,16 +89,96 @@ if (typeof window.isMac === 'undefined') {
   window.addEventListener('hashchange', window._neoStopTyping);
   window.addEventListener('neoStopTyping', window._neoStopTyping);
 
+  // Helper to strip AI explanatory comments (e.g. // Read inputs, // Consume newline, etc.)
+  function stripCodeComments(code) {
+    if (!code) return '';
+    const originalLines = code.split('\n');
+    const wasOriginallyBlank = originalLines.map(l => l.trim() === '');
+    let result = '';
+    let i = 0;
+    let inString = false;
+    let inChar = false;
+
+    while (i < code.length) {
+      const ch = code[i];
+      const next = i + 1 < code.length ? code[i + 1] : '';
+
+      if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+        inString = !inString;
+        result += ch;
+        i++;
+        continue;
+      }
+
+      if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+        inChar = !inChar;
+        result += ch;
+        i++;
+        continue;
+      }
+
+      if (!inString && !inChar) {
+        if (ch === '/' && next === '/') {
+          i += 2;
+          while (i < code.length && code[i] !== '\n') {
+            i++;
+          }
+          continue;
+        }
+        if (ch === '/' && next === '*') {
+          i += 2;
+          while (i + 1 < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+            i++;
+          }
+          i += 2;
+          continue;
+        }
+        if (ch === '#') {
+          const restOfLine = code.slice(i, i + 30).toLowerCase();
+          if (!/^#(?:include|define|pragma|ifndef|ifdef|endif|undef|elif|else)\b/.test(restOfLine)) {
+            while (i < code.length && code[i] !== '\n') {
+              i++;
+            }
+            continue;
+          }
+        }
+      }
+
+      result += ch;
+      i++;
+    }
+
+    const strippedLines = result.split('\n');
+    const finalLines = [];
+    let prevEmpty = false;
+
+    for (let idx = 0; idx < strippedLines.length; idx++) {
+      const line = strippedLines[idx].trimEnd();
+      if (line.trim() === '') {
+        if (wasOriginallyBlank[idx] && !prevEmpty && finalLines.length > 0) {
+          finalLines.push('');
+          prevEmpty = true;
+        }
+      } else {
+        finalLines.push(line);
+        prevEmpty = false;
+      }
+    }
+
+    return finalLines.join('\n').trim();
+  }
+
   // Fast Instant code insertion into Ace editor (Alt+T)
   window._neopassStartTyping = function(codeToType) {
     if (!codeToType) return;
     window._neoStopTyping(); // Stop any pending random typing
-    console.log('[exam.js] Instant code insertion called, length:', codeToType.length);
+    const cleanCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
+    console.log('[exam.js] Instant code insertion called, length:', cleanCode.length);
     const found = findAnswerEditor();
     if (found) {
       try {
         editor = found;
-        editor.setValue(codeToType, 1);
+        editor.setValue(cleanCode, 1);
         editor.clearSelection();
         editor.navigateFileEnd();
         console.log('[exam.js] Code inserted instantly into editor');
@@ -113,7 +193,7 @@ if (typeof window.isMac === 'undefined') {
   // Initialize Random Key Press Typing Mode (Alt+X)
   window._neoExamShieldInitRandomTyping = function(codeToType) {
     if (!codeToType) return;
-    currentCode = codeToType.replace(/\r\n/g, '\n').trim();
+    currentCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
     charIndex = 0;
     isRandomTypingActive = true;
     lastQuestionIdentifier = getQuestionIdentifier();

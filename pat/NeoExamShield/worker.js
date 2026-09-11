@@ -599,6 +599,88 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
     }
 }
 
+// Helper to strip AI explanatory comments (e.g. // Read inputs, // Consume newline, etc.)
+function stripCodeComments(code) {
+    if (!code) return '';
+    const originalLines = code.split('\n');
+    const wasOriginallyBlank = originalLines.map(l => l.trim() === '');
+    let result = '';
+    let i = 0;
+    let inString = false;
+    let inChar = false;
+
+    while (i < code.length) {
+        const ch = code[i];
+        const next = i + 1 < code.length ? code[i + 1] : '';
+
+        if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+            inString = !inString;
+            result += ch;
+            i++;
+            continue;
+        }
+
+        if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+            inChar = !inChar;
+            result += ch;
+            i++;
+            continue;
+        }
+
+        if (!inString && !inChar) {
+            // C/C++/Java single line comments: //
+            if (ch === '/' && next === '/') {
+                i += 2;
+                while (i < code.length && code[i] !== '\n') {
+                    i++;
+                }
+                continue;
+            }
+            // Multi-line comments: /* ... */
+            if (ch === '/' && next === '*') {
+                i += 2;
+                while (i + 1 < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+                    i++;
+                }
+                i += 2;
+                continue;
+            }
+            // Python/Shell comments: # (preserve C/C++ preprocessor like #include, #define)
+            if (ch === '#') {
+                const restOfLine = code.slice(i, i + 30).toLowerCase();
+                if (!/^#(?:include|define|pragma|ifndef|ifdef|endif|undef|elif|else)\b/.test(restOfLine)) {
+                    while (i < code.length && code[i] !== '\n') {
+                        i++;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        result += ch;
+        i++;
+    }
+
+    const strippedLines = result.split('\n');
+    const finalLines = [];
+    let prevEmpty = false;
+
+    for (let idx = 0; idx < strippedLines.length; idx++) {
+        const line = strippedLines[idx].trimEnd();
+        if (line.trim() === '') {
+            if (wasOriginallyBlank[idx] && !prevEmpty && finalLines.length > 0) {
+                finalLines.push('');
+                prevEmpty = true;
+            }
+        } else {
+            finalLines.push(line);
+            prevEmpty = false;
+        }
+    }
+
+    return finalLines.join('\n').trim();
+}
+
 function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = []) {
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
@@ -656,6 +738,8 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 cleanedCode = cleanedCode.replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
             }
             cleanedCode = cleanedCode.replace(/\r\n/g, '\n').trim();
+            // Strip AI comments (e.g. // Read inputs, // Consume newline, etc.)
+            cleanedCode = stripCodeComments(cleanedCode);
 
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
@@ -1500,7 +1584,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         queryText = `You are solving a HackerRank coding problem. Provide ONLY the complete solution code that can be directly run.
 
 IMPORTANT REQUIREMENTS:
-- Provide ONLY the solution code, no explanations or comments
+- Provide ONLY the solution code, absolutely NO explanations or comments (no //, no #, no /* */ comments like "// Read inputs" or "// Consume newline")
 - The code must be complete and ready to run
 - Include all necessary imports and function definitions
 - Handle input/output exactly as specified
@@ -1513,8 +1597,9 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         // Original prompt for other platforms
                         queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
                             Ensure the code: Meets the requirements outlined in the problem statement.
-                            Stricly Passes all test cases, including edge cases and boundary conditions.
-                            Always get the input from the users.` +
+                            Strictly passes all test cases, including edge cases and boundary conditions.
+                            Always get the input from the users.
+                            CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.` +
                             `Question:\n${request.question}\n\n` +
                             (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}\n\n` : '') +
                             (request.constraints ? `Constraints:\n${request.constraints}\n\n` : '') +
