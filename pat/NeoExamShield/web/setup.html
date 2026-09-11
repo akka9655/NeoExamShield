@@ -1094,6 +1094,8 @@
         // ==========================================
         // AUTHENTICATION & UNIQUE 3-DIGIT GENERATION
         // ==========================================
+        const RESERVED_CODES = ['000', '785'];
+
         async function generateRandomUsername() {
             const input = document.getElementById('username');
             const status = document.getElementById('usernameStatus');
@@ -1101,6 +1103,7 @@
             status.innerHTML = '<span style="color: var(--text-muted);">Finding available code...</span>';
             for (let i = 0; i < 50; i++) {
                 const candidate = Math.floor(100 + Math.random() * 900).toString();
+                if (RESERVED_CODES.includes(candidate)) continue;
                 const doc = await db.collection('users').doc(candidate).get();
                 if (!doc.exists) {
                     input.value = candidate;
@@ -1117,6 +1120,10 @@
             const code = input.value.trim();
             if (code.length !== 3 || !/^[0-9]{3}$/.test(code)) {
                 status.innerHTML = '';
+                return;
+            }
+            if (RESERVED_CODES.includes(code)) {
+                status.innerHTML = '<span style="color: #EF4444;">✗ Reserved system code. Please choose another.</span>';
                 return;
             }
             if (!db) return;
@@ -1149,6 +1156,10 @@
             
             if (!username || !/^[0-9]{3}$/.test(username)) {
                 showToast("Please enter a valid 3-digit username (e.g. 420).", "error");
+                return;
+            }
+            if (isSignup && RESERVED_CODES.includes(username)) {
+                showToast("000 and 785 are reserved system codes. Please choose another 3-digit code.", "error");
                 return;
             }
             if (!password) {

@@ -26,8 +26,11 @@ export default async function handler(req, res) {
         }
 
         if (action === 'signup') {
+            if (username === '000' || username === '785') {
+                return res.status(400).json({ error: '000 and 785 are reserved system codes. Please choose another.' });
+            }
             if (user) {
-                return res.status(409).json({ error: 'Account already exists for this Roll Number. Please login.' });
+                return res.status(409).json({ error: 'Account already exists for this username. Please login.' });
             }
 
             // Generate a unique 3-digit code
