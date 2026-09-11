@@ -950,7 +950,7 @@ async function getCustomAPIConfig() {
 }
 
 // Function to query custom AI API
-async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
+async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = null) {
     const { aiProvider, customEndpoint, apiKey, modelName } = config;
     
     // Construct the prompt based on query type
@@ -965,6 +965,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
     
     try {
         let apiUrl, requestBody, headers;
+        const imageList = Array.isArray(image) ? image : (image ? [image] : []);
         
         // Configure API call based on provider
         switch (aiProvider) {
@@ -974,10 +975,22 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`
                 };
+                let openaiContent = prompt;
+                if (imageList.length > 0) {
+                    openaiContent = [{ type: 'text', text: prompt }];
+                    for (const img of imageList) {
+                        if (typeof img === 'string' && img.length > 0) {
+                            openaiContent.push({
+                                type: 'image_url',
+                                image_url: { url: img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}` }
+                            });
+                        }
+                    }
+                }
                 requestBody = {
                     model: modelName || 'gpt-4o-mini',
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: 1
+                    messages: [{ role: 'user', content: openaiContent }],
+                    temperature: 0.1
                 };
                 break;
                 
@@ -988,10 +1001,32 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                     'x-api-key': apiKey,
                     'anthropic-version': '2023-06-01'
                 };
+                let anthropicContent = prompt;
+                if (imageList.length > 0) {
+                    anthropicContent = [{ type: 'text', text: prompt }];
+                    for (const img of imageList) {
+                        if (typeof img === 'string' && img.length > 0) {
+                            const base64Data = img.includes(',') ? img.split(',')[1] : img;
+                            let mediaType = 'image/jpeg';
+                            if (img.startsWith('data:')) {
+                                const match = img.match(/data:([^;]+);/);
+                                if (match) mediaType = match[1];
+                            }
+                            anthropicContent.push({
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: mediaType,
+                                    data: base64Data
+                                }
+                            });
+                        }
+                    }
+                }
                 requestBody = {
                     model: modelName || 'claude-3-5-sonnet-20241022',
-                    max_tokens: 4096,
-                    messages: [{ role: 'user', content: prompt }]
+                    max_tokens: isMCQ ? 150 : 2048,
+                    messages: [{ role: 'user', content: anthropicContent }]
                 };
                 break;
                 
@@ -1003,20 +1038,22 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                 };
                 
                 const googleParts = [{ text: prompt }];
-                // Multimodal support: if image is present, attach as inlineData
-                if (typeof image === 'string' && image.length > 0) {
-                    const base64Data = image.includes(',') ? image.split(',')[1] : image;
-                    let mimeType = 'image/jpeg';
-                    if (image.startsWith('data:')) {
-                        const match = image.match(/data:([^;]+);/);
-                        if (match) mimeType = match[1];
-                    }
-                    googleParts.push({
-                        inlineData: {
-                            mimeType: mimeType,
-                            data: base64Data
+                // Multimodal support: attach all images as inlineData
+                for (const img of imageList) {
+                    if (typeof img === 'string' && img.length > 0) {
+                        const base64Data = img.includes(',') ? img.split(',')[1] : img;
+                        let mimeType = 'image/jpeg';
+                        if (img.startsWith('data:')) {
+                            const match = img.match(/data:([^;]+);/);
+                            if (match) mimeType = match[1];
                         }
-                    });
+                        googleParts.push({
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Data
+                            }
+                        });
+                    }
                 }
                 
                 const generationConfig = {
@@ -1277,8 +1314,11 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     type: request.isCoding ? 'Coding Question' : 'MCQ',
                     prompt: queryText,
                     length: queryText.length
-                });                // Send query and handle response
-                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id);
+                });
+
+                // Send query and handle response
+                const reqImages = request.images || (request.image ? [request.image] : null);
+                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id, reqImages);
                 
                 // Check if response is successful (string) or contains error
                 if (response && typeof response === 'string') {

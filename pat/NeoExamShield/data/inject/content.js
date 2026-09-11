@@ -154,6 +154,51 @@ function htmlToText(element) {
     return clone.innerText.trim();
 }
 
+// Helper to extract all diagrams/images in question containers as base64 data URLs
+async function extractImagesFromElement(container) {
+    if (!container) return [];
+    const imgs = container.querySelectorAll('img');
+    const images = [];
+
+    for (const img of imgs) {
+        // Filter out tiny icons, decorative curve SVGs, UI indicators (< 25px)
+        const isIcon = (img.width > 0 && img.width < 25) || 
+                       (img.height > 0 && img.height < 25) ||
+                       (img.src && (img.src.includes('clock.svg') || img.src.includes('test_curve.svg')));
+        
+        if (isIcon) continue;
+
+        try {
+            if (img.src && img.src.startsWith('data:image/')) {
+                images.push(img.src);
+            } else if (img.src) {
+                if (img.complete && img.naturalWidth > 20) {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.naturalWidth;
+                    canvas.height = img.naturalHeight;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    images.push(canvas.toDataURL('image/jpeg', 0.85));
+                } else {
+                    const res = await fetch(img.src);
+                    const blob = await res.blob();
+                    const b64 = await new Promise((resolve) => {
+                        const reader = new FileReader();
+                        reader.onloadend = () => resolve(reader.result);
+                        reader.onerror = () => resolve(null);
+                        reader.readAsDataURL(blob);
+                    });
+                    if (b64) images.push(b64);
+                }
+            }
+        } catch (e) {
+            console.warn('[Image Extraction] Skipping non-convertible image:', e);
+        }
+    }
+
+    return images;
+}
+
 // Function to extract the question, code, and options
 function extractQuestionCodeAndOptions() {
     // Extracting the question text
@@ -188,13 +233,22 @@ function extractQuestionCodeAndOptions() {
 async function handleQuestionExtraction() {
     const { question, code, options } = extractQuestionCodeAndOptions();
 
-    if (!question) {
+    // Extract all diagrams and images from the entire question and options area
+    const questionContainer = document.querySelector('div[aria-labelledby="question-answer"]') || 
+                              document.querySelector('testtaking-question') || 
+                              document.querySelector('div[aria-labelledby="question-data"]') || 
+                              document.body;
+
+    const images = await extractImagesFromElement(questionContainer);
+
+    if (!question && !options && images.length === 0) {
         return;
     }
 
     console.log('Question:', question);
     console.log('Code:\n', code ? code : 'No code available');
     console.log('Options:\n', options);
+    console.log('[MCQ] Diagrams/Images extracted:', images.length);
 
     // Send the extracted data to background.js
     // The clicking will be handled by the clickMCQOption message handler
@@ -203,12 +257,13 @@ async function handleQuestionExtraction() {
         question: question,
         code: code,
         options: options,
+        images: images,
         isMCQ: true
     });
 }
 
 // Function to extract coding question details
-function extractCodingQuestion(isTyped = false) {
+async function extractCodingQuestion(isTyped = false) {
     // Extract programming language
     const programmingLanguageElement = document.querySelector('span.inner-text');
     const programmingLanguage = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'Programming language not found.';
@@ -216,6 +271,7 @@ function extractCodingQuestion(isTyped = false) {
     // Extract question components
     const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
     const questionText = questionElement ? htmlToText(questionElement) : 'Question not found.';
+    const images = await extractImagesFromElement(questionElement);
 
     const inputFormatElement = document.querySelector('div[aria-labelledby="input-format"]');
     const inputFormatText = inputFormatElement ? htmlToText(inputFormatElement) : '';
@@ -353,6 +409,7 @@ function extractCodingQuestion(isTyped = false) {
         headerSnippet: headerSnippet,
         footerSnippet: footerSnippet,
         whitelist: whitelistText,
+        images: images,
         isCoding: true,
         isTyped: isTyped
     }, (response) => {

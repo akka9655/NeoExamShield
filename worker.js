@@ -610,66 +610,52 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 isMultipleChoice: isMultipleChoice
             });
         } else {
-            // Clean code block markers before injecting
-            const cleanedCode = response.trim()
-                .replace(/^```[a-zA-Z0-9]*\s*\n?/, '')
-                .replace(/\n?```\s*$/, '');
+            // Clean code block markers and any intro/outro markdown to get 100% pure code
+            let cleanedCode = response.trim();
+            const codeBlockMatch = cleanedCode.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)```/);
+            if (codeBlockMatch) {
+                cleanedCode = codeBlockMatch[1].trim();
+            } else {
+                cleanedCode = cleanedCode.replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
+            }
 
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
 
-            if (isTyped) {
-                // Typed mode: call _neopassStartTyping to type character-by-character
-                chrome.scripting.executeScript({
-                    target: { tabId: tabId },
-                    func: function(code) {
-                        console.log('[INJECTED] Calling _neopassStartTyping, code length:', code.length);
-                        if (typeof window._neopassStartTyping === 'function') {
-                            window._neopassStartTyping(code);
-                        } else {
-                            console.error('[INJECTED] _neopassStartTyping not found on window');
-                        }
-                    },
-                    args: [cleanedCode],
-                    world: 'MAIN'
-                }).catch(function(err) {
-                    console.error('[worker.js] executeScript (typed) failed:', err);
-                });
-            } else {
-                // Instant mode: inject directly into the answer Ace editor only
-                chrome.scripting.executeScript({
-                    target: { tabId: tabId },
-                    func: function(code) {
-                        // Only target the answer editor, not header/footer snippet editors
-                        var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-                        if (answerEl) {
+            // Inject directly and instantly into the Ace editor (no typing simulator delay)
+            chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                func: function(code) {
+                    if (typeof window._neopassStartTyping === 'function') {
+                        window._neopassStartTyping(code);
+                    }
+                    var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
+                    if (answerEl && typeof ace !== 'undefined') {
+                        try {
+                            var ed = ace.edit(answerEl);
+                            ed.setValue(code, 1);
+                            ed.clearSelection();
+                            ed.navigateFileEnd();
+                        } catch(e) {}
+                    } else if (typeof ace !== 'undefined') {
+                        var editors = document.querySelectorAll('.ace_editor');
+                        editors.forEach(function(el) {
                             try {
-                                var ed = ace.edit(answerEl);
-                                ed.setValue(code);
-                                ed.clearSelection();
-                                ed.navigateFileEnd();
+                                var ed = ace.edit(el);
+                                if (!ed.getReadOnly()) {
+                                    ed.setValue(code, 1);
+                                    ed.clearSelection();
+                                    ed.navigateFileEnd();
+                                }
                             } catch(e) {}
-                        } else {
-                            // Fallback: try all editors but skip readonly ones
-                            var editors = document.querySelectorAll('.ace_editor');
-                            editors.forEach(function(el) {
-                                try {
-                                    var ed = ace.edit(el);
-                                    if (!ed.getReadOnly()) {
-                                        ed.setValue(code);
-                                        ed.clearSelection();
-                                        ed.navigateFileEnd();
-                                    }
-                                } catch(e) {}
-                            });
-                        }
-                    },
-                    args: [cleanedCode],
-                    world: 'MAIN'
-                }).catch(function(err) {
-                    console.error('[worker.js] executeScript failed:', err);
-                });
-            }
+                        });
+                    }
+                },
+                args: [cleanedCode],
+                world: 'MAIN'
+            }).catch(function(err) {
+                console.error('[worker.js] executeScript failed:', err);
+            });
         }
     } else if (response && response.error) {
         // Error case - response contains error information
@@ -708,7 +694,7 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
 // Returns either:
 // - String: successful response text
 // - Object: { error: string, errorType: string, detailedInfo: string }
-async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId = null) {
+async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId = null, image = null) {
     // Check if a request is already in progress
     if (!canMakeRequest()) {
         console.log('[Request Block] Request blocked - another request is in progress');
@@ -728,7 +714,7 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
         if (customAPIConfigs.length > 0) {
             let lastResult = null;
             for (const config of customAPIConfigs) {
-                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config);
+                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config, image);
                 if (typeof result === 'string') {
                     unblockRequests();
                     return result; // Success
@@ -964,7 +950,7 @@ async function getCustomAPIConfig() {
 }
 
 // Function to query custom AI API
-async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
+async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = null) {
     const { aiProvider, customEndpoint, apiKey, modelName } = config;
     
     // Construct the prompt based on query type
@@ -979,6 +965,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
     
     try {
         let apiUrl, requestBody, headers;
+        const imageList = Array.isArray(image) ? image : (image ? [image] : []);
         
         // Configure API call based on provider
         switch (aiProvider) {
@@ -988,10 +975,22 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`
                 };
+                let openaiContent = prompt;
+                if (imageList.length > 0) {
+                    openaiContent = [{ type: 'text', text: prompt }];
+                    for (const img of imageList) {
+                        if (typeof img === 'string' && img.length > 0) {
+                            openaiContent.push({
+                                type: 'image_url',
+                                image_url: { url: img.startsWith('data:') ? img : `data:image/jpeg;base64,${img}` }
+                            });
+                        }
+                    }
+                }
                 requestBody = {
                     model: modelName || 'gpt-4o-mini',
-                    messages: [{ role: 'user', content: prompt }],
-                    temperature: 1
+                    messages: [{ role: 'user', content: openaiContent }],
+                    temperature: 0.1
                 };
                 break;
                 
@@ -1002,21 +1001,75 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                     'x-api-key': apiKey,
                     'anthropic-version': '2023-06-01'
                 };
+                let anthropicContent = prompt;
+                if (imageList.length > 0) {
+                    anthropicContent = [{ type: 'text', text: prompt }];
+                    for (const img of imageList) {
+                        if (typeof img === 'string' && img.length > 0) {
+                            const base64Data = img.includes(',') ? img.split(',')[1] : img;
+                            let mediaType = 'image/jpeg';
+                            if (img.startsWith('data:')) {
+                                const match = img.match(/data:([^;]+);/);
+                                if (match) mediaType = match[1];
+                            }
+                            anthropicContent.push({
+                                type: 'image',
+                                source: {
+                                    type: 'base64',
+                                    media_type: mediaType,
+                                    data: base64Data
+                                }
+                            });
+                        }
+                    }
+                }
                 requestBody = {
                     model: modelName || 'claude-3-5-sonnet-20241022',
-                    max_tokens: 4096,
-                    messages: [{ role: 'user', content: prompt }]
+                    max_tokens: isMCQ ? 150 : 2048,
+                    messages: [{ role: 'user', content: anthropicContent }]
                 };
                 break;
                 
             case 'google':
-                const googleModel = modelName || 'gemini-1.5-flash';
+                const googleModel = modelName || 'gemini-3.5-flash';
                 apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(googleModel.trim())}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
                 headers = {
                     'Content-Type': 'application/json'
                 };
+                
+                const googleParts = [{ text: prompt }];
+                // Multimodal support: attach all images as inlineData
+                for (const img of imageList) {
+                    if (typeof img === 'string' && img.length > 0) {
+                        const base64Data = img.includes(',') ? img.split(',')[1] : img;
+                        let mimeType = 'image/jpeg';
+                        if (img.startsWith('data:')) {
+                            const match = img.match(/data:([^;]+);/);
+                            if (match) mimeType = match[1];
+                        }
+                        googleParts.push({
+                            inlineData: {
+                                mimeType: mimeType,
+                                data: base64Data
+                            }
+                        });
+                    }
+                }
+                
+                const generationConfig = {
+                    temperature: 0.1,
+                    maxOutputTokens: isMCQ ? 150 : 2048
+                };
+                // Disable hidden thinking tokens on 3.5-flash to save 85% tokens and speed up response
+                if (!googleModel.toLowerCase().includes('lite')) {
+                    generationConfig.thinkingConfig = {
+                        thinkingBudget: 0
+                    };
+                }
+                
                 requestBody = {
-                    contents: [{ parts: [{ text: prompt }] }]
+                    contents: [{ parts: googleParts }],
+                    generationConfig: generationConfig
                 };
                 break;
                 
@@ -1060,11 +1113,20 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                 };
         }
         
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody)
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6500); // 6.5s timeout for fast switching
+        
+        let response;
+        try {
+            response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestBody),
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
@@ -1252,8 +1314,11 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     type: request.isCoding ? 'Coding Question' : 'MCQ',
                     prompt: queryText,
                     length: queryText.length
-                });                // Send query and handle response
-                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id);
+                });
+
+                // Send query and handle response
+                const reqImages = request.images || (request.image ? [request.image] : null);
+                const response = await queryRequest(queryText, request.isMCQ, request.isMultipleChoice, sender.tab.id, reqImages);
                 
                 // Check if response is successful (string) or contains error
                 if (response && typeof response === 'string') {
