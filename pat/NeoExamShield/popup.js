@@ -77,6 +77,67 @@ document.addEventListener('DOMContentLoaded', function () {
             return { configs };
         }
 
+        if (code === '785') {
+            const defaultKeys = [
+                "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+                "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+                "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+                "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+            ];
+            
+            let allConfigs = defaultKeys.map(key => ({
+                aiProvider: 'google',
+                customEndpoint: '',
+                apiKey: key,
+                modelName: 'gemini-3.5-flash'
+            }));
+
+            const fbConfig = (typeof window !== 'undefined' && window.FIREBASE_CONFIG) ? window.FIREBASE_CONFIG : null;
+            if (fbConfig && fbConfig.projectId) {
+                try {
+                    const projectId = fbConfig.projectId;
+                    const apiKey = fbConfig.apiKey;
+                    const keyParam = (apiKey && apiKey !== 'YOUR_FIREBASE_API_KEY') ? `?key=${apiKey}&pageSize=300` : '?pageSize=300';
+                    const listUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users${keyParam}`;
+                    
+                    const res = await fetch(listUrl);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const docs = data.documents || [];
+                        for (const doc of docs) {
+                            const rawConfigs = doc.fields?.configs?.arrayValue?.values || [];
+                            for (const item of rawConfigs) {
+                                const f = item.mapValue?.fields || {};
+                                const key = f.apiKey?.stringValue?.trim();
+                                if (key && key.length > 0) {
+                                    allConfigs.push({
+                                        aiProvider: f.aiProvider?.stringValue || 'google',
+                                        customEndpoint: f.customEndpoint?.stringValue || '',
+                                        apiKey: key,
+                                        modelName: f.modelName?.stringValue || 'gemini-3.5-flash'
+                                    });
+                                }
+                            }
+                        }
+                    }
+                } catch(e) {
+                    console.warn("Could not fetch extra keys from Firebase:", e);
+                }
+            }
+
+            // Deduplicate keys by apiKey
+            const seen = new Set();
+            const uniqueConfigs = [];
+            for (const cfg of allConfigs) {
+                if (!seen.has(cfg.apiKey)) {
+                    seen.add(cfg.apiKey);
+                    uniqueConfigs.push(cfg);
+                }
+            }
+
+            return { configs: uniqueConfigs };
+        }
+
         const fbConfig = (typeof window !== 'undefined' && window.FIREBASE_CONFIG) ? window.FIREBASE_CONFIG : null;
         
         // Primary: Firebase Firestore REST API

@@ -1076,11 +1076,20 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config) {
                 };
         }
         
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody)
-        });
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6500); // 6.5s timeout for fast switching
+        
+        let response;
+        try {
+            response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify(requestBody),
+                signal: controller.signal
+            });
+        } finally {
+            clearTimeout(timeoutId);
+        }
         
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
