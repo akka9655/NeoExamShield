@@ -1207,7 +1207,7 @@ async function resolveImageToBase64(imgUrlOrData) {
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
     const defaultModel = 'gemini-3.6-flash';
     const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
-    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-flash-latest', 'gemini-3.5-flash-lite'];
+    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-flash-latest', 'gemini-3.5-flash'];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
