@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-1.5-flash'
+                modelName: 'gemini-3.5-flash'
             }));
             return { configs };
         }
@@ -105,7 +105,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     aiProvider: f.aiProvider?.stringValue || 'google',
                     customEndpoint: f.customEndpoint?.stringValue || '',
                     apiKey: f.apiKey?.stringValue || '',
-                    modelName: f.modelName?.stringValue || 'gemini-1.5-flash'
+                    modelName: f.modelName?.stringValue || 'gemini-3.5-flash'
                 };
             }).filter(c => Boolean(c.apiKey));
 
