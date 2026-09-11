@@ -1,0 +1,1652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>NeoExamShield - API Key & Priority Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #1686FF;
+            --primary-dark: #0066d6;
+            --primary-light: #e8f3ff;
+            --primary-glow: rgba(22, 134, 255, 0.25);
+            --bg: #F4F7FB;
+            --surface: #FFFFFF;
+            --surface-subtle: #F8FAFC;
+            --border: #E2E8F0;
+            --border-focus: #1686FF;
+            --text: #0F172A;
+            --text-muted: #64748B;
+            --success: #10B981;
+            --success-bg: #ECFDF5;
+            --danger: #EF4444;
+            --danger-bg: #FEF2F2;
+            --radius: 14px;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow: 0 10px 30px -5px rgba(15, 23, 42, 0.08);
+            --shadow-lg: 0 20px 40px -10px rgba(15, 23, 42, 0.12);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1.5rem 1rem;
+            position: relative;
+        }
+
+        /* Subtle background decorative shapes */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -100px;
+            left: -100px;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(22, 134, 255, 0.08) 0%, rgba(244, 247, 251, 0) 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        body::after {
+            content: '';
+            position: fixed;
+            bottom: -100px;
+            right: -100px;
+            width: 450px;
+            height: 450px;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.06) 0%, rgba(244, 247, 251, 0) 70%);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .container {
+            background: var(--surface);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            border: 1px solid rgba(226, 232, 240, 0.8);
+            width: 100%;
+            max-width: 580px;
+            padding: 2.25rem 2rem;
+            position: relative;
+            z-index: 1;
+            transition: all 0.3s ease;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 1rem 0.75rem;
+                align-items: flex-start;
+            }
+            .container {
+                padding: 1.5rem 1.25rem;
+                border-radius: 16px;
+            }
+        }
+
+        .brand-header {
+            text-align: center;
+            margin-bottom: 1.75rem;
+        }
+
+        .brand-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--primary-light);
+            color: var(--primary);
+            font-weight: 700;
+            font-size: 0.75rem;
+            padding: 4px 12px;
+            border-radius: 20px;
+            margin-bottom: 0.75rem;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .brand-header h1 {
+            font-size: 1.75rem;
+            font-weight: 800;
+            color: var(--text);
+            letter-spacing: -0.5px;
+            margin-bottom: 0.35rem;
+        }
+
+        .brand-header p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Form Styles */
+        .form-group {
+            margin-bottom: 1.25rem;
+            position: relative;
+        }
+
+        .form-label {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.825rem;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 0.45rem;
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.85rem 1rem;
+            background: var(--surface-subtle);
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            font-size: 0.95rem;
+            color: var(--text);
+            transition: all 0.2s ease;
+            outline: none;
+        }
+
+        .form-control:focus {
+            background: #FFFFFF;
+            border-color: var(--border-focus);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
+        select.form-control {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 1rem center;
+            padding-right: 2.5rem;
+            cursor: pointer;
+        }
+
+        
+        .input-actions {
+            position: absolute;
+            right: 8px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            z-index: 2;
+        }
+
+        .btn-paste-pill {
+            background: #EFF6FF;
+            color: var(--primary);
+            border: 1px solid #BFDBFE;
+            font-size: 0.725rem;
+            font-weight: 700;
+            padding: 4px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+
+        .btn-paste-pill:hover {
+            background: var(--primary);
+            color: #FFFFFF;
+            border-color: var(--primary);
+        }
+
+        .api-input {
+            padding-right: 90px !important;
+            font-family: 'JetBrains Mono', monospace !important;
+            font-size: 0.85rem !important;
+            letter-spacing: -0.2px;
+        }
+
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toggle-password:hover {
+            color: var(--primary);
+        }
+
+        /* Buttons */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 0.875rem 1.25rem;
+            font-size: 0.95rem;
+            font-weight: 700;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #FFFFFF;
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px var(--primary-glow);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: #FFFFFF;
+            color: #334155;
+            border: 1.5px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--surface-subtle);
+            border-color: #CBD5E1;
+        }
+
+        .btn-danger-subtle {
+            background: var(--danger-bg);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .btn-danger-subtle:hover {
+            background: #FEE2E2;
+        }
+
+        .btn-sm {
+            padding: 0.5rem 0.85rem;
+            font-size: 0.8rem;
+            border-radius: 8px;
+            width: auto;
+        }
+
+        .btn-link {
+            background: transparent;
+            border: none;
+            color: var(--primary);
+            font-weight: 700;
+            cursor: pointer;
+            padding: 0;
+            font-size: inherit;
+        }
+
+        .btn-link:hover {
+            text-decoration: underline;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+
+        /* 3-Digit Code Display Card */
+        .code-hero {
+            background: linear-gradient(135deg, #F0F7FF 0%, #E0EFFF 100%);
+            border: 2px dashed #93C5FD;
+            border-radius: 16px;
+            padding: 1.5rem 1rem;
+            text-align: center;
+            margin-bottom: 1.75rem;
+            position: relative;
+        }
+
+        .code-hero-label {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #1E40AF;
+            text-transform: uppercase;
+            letter-spacing: 0.75px;
+            margin-bottom: 0.35rem;
+        }
+
+        .code-hero-digits {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 3.25rem;
+            font-weight: 800;
+            color: var(--primary);
+            letter-spacing: 8px;
+            line-height: 1;
+            margin: 0.5rem 0 0.75rem 0;
+            text-shadow: 0 2px 4px rgba(22, 134, 255, 0.15);
+        }
+
+        .copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #FFFFFF;
+            color: var(--primary);
+            border: 1px solid #BFDBFE;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .copy-btn:hover {
+            background: var(--primary);
+            color: #FFFFFF;
+            border-color: var(--primary);
+        }
+
+        /* API Configuration Cards */
+        .config-card {
+            background: #FFFFFF;
+            border: 1.5px solid var(--border);
+            border-radius: 14px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+            box-shadow: var(--shadow-sm);
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .config-card:hover {
+            border-color: #CBD5E1;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .card-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-priority {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .priority-tag {
+            font-size: 0.725rem;
+            font-weight: 700;
+            background: var(--primary);
+            color: #FFFFFF;
+            padding: 3px 10px;
+            border-radius: 12px;
+            letter-spacing: 0.3px;
+        }
+
+        .card-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-icon {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-icon:hover {
+            background: var(--primary-light);
+            color: var(--primary);
+            border-color: #BFDBFE;
+        }
+
+        .btn-icon.delete:hover {
+            background: var(--danger-bg);
+            color: var(--danger);
+            border-color: #FECACA;
+        }
+
+        .gemini-quick-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 100%;
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: #FFFFFF;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-decoration: none;
+            margin-bottom: 1rem;
+            box-shadow: 0 2px 6px rgba(16, 185, 129, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .gemini-quick-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(16, 185, 129, 0.3);
+        }
+
+        /* Top Nav Bar in Dashboard */
+        .dash-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.25rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .user-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            background: var(--primary-light);
+            color: var(--primary);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 0.75rem;
+        }
+
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        @media (max-width: 640px) {
+            #toast-container {
+                left: 20px;
+                right: 20px;
+                top: 15px;
+            }
+        }
+
+        .toast {
+            pointer-events: auto;
+            min-width: 260px;
+            max-width: 380px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: #FFFFFF;
+            color: var(--text);
+            font-size: 0.875rem;
+            font-weight: 600;
+            box-shadow: var(--shadow-lg);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            transition: all 0.2s ease;
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast.info {
+            border-left: 4px solid var(--primary);
+        }
+
+        @keyframes toastSlideIn {
+            from {
+                transform: translateY(-20px) scale(0.95);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0) scale(1);
+                opacity: 1;
+            }
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 0.75rem 0;
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+
+        .collapsible-header:hover {
+            color: var(--text);
+        }
+
+        /* Fast Setup Guide Styles */
+        .setup-guide-card {
+            background: linear-gradient(135deg, rgba(22, 134, 255, 0.04) 0%, rgba(16, 185, 129, 0.04) 100%);
+            border: 1.5px solid rgba(22, 134, 255, 0.2);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .setup-guide-card:hover {
+            border-color: rgba(22, 134, 255, 0.35);
+        }
+
+        .setup-guide-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .setup-guide-body {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(226, 232, 240, 0.8);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .step-badge {
+            width: 22px;
+            height: 22px;
+            background: var(--primary);
+            color: #FFFFFF;
+            font-size: 0.75rem;
+            font-weight: 800;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .step-text {
+            font-size: 0.825rem;
+            color: var(--text);
+            line-height: 1.45;
+        }
+
+        .step-text strong {
+            color: var(--text);
+            font-weight: 700;
+        }
+
+        .code-pill {
+            background: #E2E8F0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: var(--primary-dark);
+            font-weight: 600;
+        }
+
+        .step-link {
+            color: var(--primary);
+            text-decoration: underline;
+            font-weight: 700;
+        }
+
+        .shortcut-box {
+            background: #FFFFFF;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-top: 4px;
+        }
+
+        .shortcut-title {
+            font-size: 0.75rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .shortcut-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 6px;
+        }
+
+        .shortcut-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .kbd {
+            background: #F1F5F9;
+            border: 1px solid #CBD5E1;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text);
+            flex-shrink: 0;
+        }
+
+        .shortcut-desc {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+    </style>
+
+    <!-- Firebase SDK v10 (Compat version) -->
+    <script src="firebaseConfig.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+
+    <!-- Toast Notifications Anchor -->
+    <div id="toast-container"></div>
+
+    <!-- ============================================== -->
+    <!-- 1. AUTH SCREEN (LOGIN / SIGNUP) -->
+    <!-- ============================================== -->
+    <div class="container" id="authView">
+        <div class="brand-header">
+            <div class="brand-badge">⚡ NeoExamShield Cloud</div>
+            <h1 id="authTitle">Welcome Back</h1>
+            <p id="authSubtitle">Log in to manage your extension API keys & priorities</p>
+        </div>
+
+        <form id="authForm" onsubmit="event.preventDefault(); submitAuth();">
+            <div class="form-group">
+                <label class="form-label" for="username">Your 3-Digit Username</label>
+                <div class="input-wrapper" style="display: flex; gap: 6px;">
+                    <input type="text" id="username" class="form-control" placeholder="e.g. 420" required autocomplete="username" maxlength="3" pattern="[0-9]{3}" inputmode="numeric" style="flex: 1; font-family: monospace; font-size: 1.3rem; text-align: center; letter-spacing: 6px; font-weight: 800;">
+                    <button type="button" class="btn btn-secondary btn-sm hidden" id="randomBtn" onclick="generateRandomUsername()" title="Random Username" style="white-space: nowrap; padding: 0.5rem 0.75rem; font-size: 0.75rem;">🎲 Random</button>
+                </div>
+                <div id="usernameStatus" style="font-size: 0.75rem; margin-top: 4px; font-weight: 600; min-height: 18px;"></div>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="password">Account Password</label>
+                <div class="input-wrapper">
+                    <input type="password" id="password" class="form-control" placeholder="Enter your password" required autocomplete="current-password">
+                    <button type="button" class="toggle-password" onclick="togglePasswordVisibility('password', this)" title="Show/Hide Password">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="form-group hidden" id="confirmPasswordGroup">
+                <label class="form-label" for="confirmPassword">Confirm Password</label>
+                <div class="input-wrapper">
+                    <input type="password" id="confirmPassword" class="form-control" placeholder="Re-type your password" autocomplete="new-password">
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="authBtn" style="margin-top: 0.5rem;">
+                <span>Login</span>
+            </button>
+        </form>
+
+        <div style="text-align: center; margin-top: 1.5rem; font-size: 0.875rem; color: var(--text-muted);">
+            <span id="authToggleText">Don't have an account?</span> 
+            <button type="button" onclick="toggleAuthMode()" id="authToggleLink" class="btn-link">Sign Up</button>
+        </div>
+
+        <!-- Quick 3-Step Setup Collapsible on Auth View -->
+        <div class="setup-guide-card" style="margin-top: 1.5rem; margin-bottom: 0;">
+            <div class="setup-guide-header" onclick="toggleAuthSetupGuide()">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.1rem;">⚡</span>
+                    <span style="font-weight: 800; font-size: 0.9rem; color: var(--text);">Quick 3-Step Fast Setup</span>
+                </div>
+                <span id="authSetupGuideChevron" style="font-size: 0.8rem; color: var(--text-muted); transition: transform 0.2s;">▼</span>
+            </div>
+            <div id="authSetupGuideContent" class="setup-guide-body hidden">
+                <div class="step-item">
+                    <div class="step-badge">1</div>
+                    <div class="step-text">
+                        <strong>Download Extension:</strong>
+                        <div>Get the <a href="https://github.com/akka9655/NeoExamShield/releases/download/v1.0.0/NeoExamShield.zip" class="step-link" target="_blank">NeoExamShield ZIP</a> and extract it.</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-badge">2</div>
+                    <div class="step-text">
+                        <strong>Load into Chrome:</strong>
+                        <div>Open <code class="code-pill">chrome://extensions/</code>, enable <strong>Developer mode</strong>, and click <strong>Load unpacked</strong>.</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-badge">3</div>
+                    <div class="step-text">
+                        <strong>Sign Up & Sync Keys:</strong>
+                        <div>Sign up above, add your Gemini/OpenAI key, and use the 3-digit sync code in the extension popup!</div>
+                    </div>
+                </div>
+                <div class="shortcut-box" style="margin-top: 0.75rem;">
+                    <div class="shortcut-title">🛡️ Screenshare Bypass</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 0.5rem;">
+                        This extension automatically bypasses fullscreen screenshare requirements forced by the portal with three stealth modes:
+                    </div>
+                    <div class="shortcut-grid" style="display: flex; flex-direction: column; gap: 4px;">
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Tab/Window</span> <span class="shortcut-desc">Share only current tab/window.</span></div>
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Blank Screen</span> <span class="shortcut-desc">Share a completely black screen.</span></div>
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Frozen Screen</span> <span class="shortcut-desc">Capture a single frame and freeze it.</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- 2. DASHBOARD VIEW (API KEYS & CONFIGS) -->
+    <!-- ============================================== -->
+    <div class="container hidden" id="configView">
+        <!-- Top Navigation -->
+        <div class="dash-header">
+            <div class="user-pill">
+                <div class="user-avatar" id="avatarLetter">U</div>
+                <div>
+                    <div id="userRollDisplay" style="line-height: 1.2;">---</div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); font-weight: 500;">Username</div>
+                </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="logout()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+                Logout
+            </button>
+        </div>
+
+        <!-- 3-Digit Code Hero -->
+        <div class="code-hero">
+            <div class="code-hero-label">Your Permanent Extension Sync Code</div>
+            <div class="code-hero-digits" id="syncCodeDisplay">---</div>
+            <button type="button" class="copy-btn" id="copyCodeBtn" onclick="copySyncCode()">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <span id="copyBtnText">Copy 3-Digit Code</span>
+            </button>
+        </div>
+
+        <!-- Fast Setup Guide Card on Dashboard -->
+        <div class="setup-guide-card">
+            <div class="setup-guide-header" onclick="toggleSetupGuide()">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.1rem;">⚡</span>
+                    <span style="font-weight: 800; font-size: 0.95rem; color: var(--text);">Quick 3-Step Fast Setup</span>
+                </div>
+                <span id="setupGuideChevron" style="font-size: 0.8rem; color: var(--text-muted); transition: transform 0.2s;">▲</span>
+            </div>
+            <div id="setupGuideContent" class="setup-guide-body">
+                <div class="step-item">
+                    <div class="step-badge">1</div>
+                    <div class="step-text">
+                        <strong>Download & Extract Extension:</strong>
+                        <div>Download the <a href="https://github.com/akka9655/NeoExamShield/releases/download/v1.0.0/NeoExamShield.zip" class="step-link" target="_blank">NeoExamShield ZIP</a> and extract it to a folder.</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-badge">2</div>
+                    <div class="step-text">
+                        <strong>Load into Chrome:</strong>
+                        <div>Open <code class="code-pill">chrome://extensions/</code> in your browser, toggle ON <strong>Developer mode</strong> (top right), click <strong>Load unpacked</strong>, and select the extracted folder.</div>
+                    </div>
+                </div>
+                <div class="step-item">
+                    <div class="step-badge">3</div>
+                    <div class="step-text">
+                        <strong>1-Click Key Sync:</strong>
+                        <div>Copy your <strong>3-digit Sync Code</strong> above, open the NeoExamShield extension popup from your Chrome toolbar, paste the code, and click <strong>Sync Keys</strong>.</div>
+                    </div>
+                </div>
+
+                <div class="shortcut-box">
+                    <div class="shortcut-title">⌨️ Keyboard Shortcuts Cheat Sheet</div>
+                    <div class="shortcut-grid">
+                        <div class="shortcut-row">
+                            <span class="kbd">Alt + A</span>
+                            <span class="shortcut-desc">Instant Auto-Solve (MCQ & Code)</span>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="kbd">Alt + T</span>
+                            <span class="shortcut-desc">Human Typing Simulator</span>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="kbd">Alt + C</span>
+                            <span class="shortcut-desc">Floating AI Chat Assistant</span>
+                        </div>
+                        <div class="shortcut-row">
+                            <span class="kbd">Alt + O</span>
+                            <span class="shortcut-desc">Stealth Opacity Toggle</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="shortcut-box" style="margin-top: 0.75rem;">
+                    <div class="shortcut-title">🛡️ Screenshare Bypass</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.4; margin-bottom: 0.5rem;">
+                        This extension automatically bypasses fullscreen screenshare requirements forced by the portal with three stealth modes:
+                    </div>
+                    <div class="shortcut-grid" style="display: flex; flex-direction: column; gap: 4px;">
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Tab/Window</span> <span class="shortcut-desc">Share only current tab/window.</span></div>
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Blank Screen</span> <span class="shortcut-desc">Share a completely black screen.</span></div>
+                        <div class="shortcut-row" style="margin-bottom: 0;"><span class="kbd" style="font-size: 0.65rem; padding: 2px 4px;">Share Frozen Screen</span> <span class="shortcut-desc">Capture a single frame and freeze it.</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <h2 style="font-size: 1.05rem; font-weight: 800; color: var(--text);">Configured AI Keys</h2>
+                <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;">Fallback Priority Order</span>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Priority 1 is queried first. If tokens run out or rate limits hit, it seamlessly falls back to Priority 2.
+            </p>
+        </div>
+
+        <!-- Dynamic List of API Configurations -->
+        <div id="configsList"></div>
+
+        <!-- Add Another Key Button -->
+        <button type="button" class="btn btn-secondary" onclick="addConfigCard()" style="margin-bottom: 1.75rem; border-style: dashed; border-width: 2px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            Add Backup AI Key
+        </button>
+
+        <!-- Account Settings Collapsible -->
+        <div style="border-top: 1px solid var(--border); padding-top: 1rem; margin-bottom: 1.5rem;">
+            <div class="collapsible-header" onclick="toggleSecuritySettings()">
+                <span>🔒 Security & Change Password</span>
+                <span id="securityChevron">▼</span>
+            </div>
+            <div id="securityFields" class="hidden" style="margin-top: 0.75rem;">
+                <div class="form-group">
+                    <label class="form-label" for="newPassword">New Password</label>
+                    <input type="password" id="newPassword" class="form-control" placeholder="Leave blank to keep existing password">
+                </div>
+            </div>
+        </div>
+
+        <!-- Save Button -->
+        <button type="button" class="btn btn-primary" onclick="saveSettings()" id="saveBtn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Save All Changes
+        </button>
+    </div>
+
+    <!-- ============================================== -->
+    <!-- LOGIC & SCRIPTS -->
+    <!-- ============================================== -->
+    <script>
+        let configCounter = 0;
+        let currentAuth = { username: '', password: '', staticCode: '' };
+        let isSignup = false;
+        let db = null;
+        let useFirebase = false;
+
+        const defaultModels = {
+            'google': 'gemini-3.5-flash',
+            'openai': 'gpt-4o-mini',
+            'anthropic': 'claude-3-5-sonnet-20240620',
+            'deepseek': 'deepseek-chat',
+            'custom': ''
+        };
+
+        // Initialize Firebase Firestore
+        try {
+            if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.projectId && window.FIREBASE_CONFIG.projectId !== 'YOUR_PROJECT_ID') {
+                firebase.initializeApp(window.FIREBASE_CONFIG);
+                db = firebase.firestore();
+                useFirebase = true;
+                console.log("✓ Firebase Firestore connected successfully.");
+            }
+        } catch (err) {
+            console.warn("Firebase Init Notice:", err);
+        }
+
+        // Check for remembered session
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedSession = localStorage.getItem('neoexam_session');
+            if (savedSession) {
+                try {
+                    const parsed = JSON.parse(savedSession);
+                    if (parsed.username && parsed.password) {
+                        document.getElementById('username').value = parsed.username;
+                        document.getElementById('password').value = parsed.password;
+                        submitAuth(true); // silent auto-login
+                    }
+                } catch (e) {
+                    localStorage.removeItem('neoexam_session');
+                }
+            }
+        });
+
+        // Toast Notification System
+        function showToast(message, type = 'info', duration = 3500) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
+            toast.innerHTML = `<span style="font-weight: 800;">${icon}</span> <span>${message}</span>`;
+            
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-10px)';
+                setTimeout(() => toast.remove(), 200);
+            }, duration);
+        }
+
+        async function pasteFromClipboard(inputId) {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text && text.trim().length > 0) {
+                    const input = document.getElementById(inputId);
+                    input.value = text.trim();
+                    input.focus();
+                    showToast("✓ API Key pasted successfully!", "success", 2000);
+                } else {
+                    showToast("Clipboard is empty. Copy your API key first.", "info");
+                }
+            } catch (err) {
+                // If browser clipboard permission is blocked, focus and guide manual paste
+                const input = document.getElementById(inputId);
+                input.focus();
+                input.select();
+                showToast("Clipboard access blocked. Please press Ctrl+V or long-press & Paste.", "info", 4000);
+            }
+        }
+
+        function togglePasswordVisibility(fieldId, btn) {
+            const input = document.getElementById(fieldId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.style.color = 'var(--primary)';
+            } else {
+                input.type = 'password';
+                btn.style.color = 'var(--text-muted)';
+            }
+        }
+
+        function toggleAuthMode() {
+            isSignup = !isSignup;
+            document.getElementById('authTitle').innerText = isSignup ? 'Create Account' : 'Welcome Back';
+            document.getElementById('authSubtitle').innerText = isSignup 
+                ? 'Choose your unique 3-digit username to get started' 
+                : 'Log in to manage your extension API keys & priorities';
+            
+            document.getElementById('authBtn').querySelector('span').innerText = isSignup ? 'Create Account' : 'Login';
+            document.getElementById('authToggleText').innerText = isSignup ? 'Already have an account?' : "Don't have an account?";
+            document.getElementById('authToggleLink').innerText = isSignup ? 'Login' : 'Sign Up';
+            
+            const confirmGroup = document.getElementById('confirmPasswordGroup');
+            const randomBtn = document.getElementById('randomBtn');
+            const usernameStatus = document.getElementById('usernameStatus');
+            if (isSignup) {
+                confirmGroup.classList.remove('hidden');
+                randomBtn.classList.remove('hidden');
+                document.getElementById('confirmPassword').setAttribute('required', 'true');
+            } else {
+                confirmGroup.classList.add('hidden');
+                randomBtn.classList.add('hidden');
+                if (usernameStatus) usernameStatus.innerHTML = '';
+                document.getElementById('confirmPassword').removeAttribute('required');
+            }
+        }
+
+        function toggleSecuritySettings() {
+            const fields = document.getElementById('securityFields');
+            const chevron = document.getElementById('securityChevron');
+            if (fields.classList.contains('hidden')) {
+                fields.classList.remove('hidden');
+                chevron.innerText = '▲';
+            } else {
+                fields.classList.add('hidden');
+                chevron.innerText = '▼';
+            }
+        }
+
+        // ==========================================
+        // AUTHENTICATION & UNIQUE 3-DIGIT GENERATION
+        // ==========================================
+        async function generateRandomUsername() {
+            const input = document.getElementById('username');
+            const status = document.getElementById('usernameStatus');
+            if (!db) { input.value = Math.floor(100 + Math.random() * 900).toString(); return; }
+            status.innerHTML = '<span style="color: var(--text-muted);">Finding available code...</span>';
+            for (let i = 0; i < 50; i++) {
+                const candidate = Math.floor(100 + Math.random() * 900).toString();
+                const doc = await db.collection('users').doc(candidate).get();
+                if (!doc.exists) {
+                    input.value = candidate;
+                    status.innerHTML = '<span style="color: #10B981;">✓ Available!</span>';
+                    return;
+                }
+            }
+            status.innerHTML = '<span style="color: #EF4444;">Could not find available code. Try manually.</span>';
+        }
+
+        async function checkUsernameAvailability() {
+            const input = document.getElementById('username');
+            const status = document.getElementById('usernameStatus');
+            const code = input.value.trim();
+            if (code.length !== 3 || !/^[0-9]{3}$/.test(code)) {
+                status.innerHTML = '';
+                return;
+            }
+            if (!db) return;
+            status.innerHTML = '<span style="color: var(--text-muted);">Checking...</span>';
+            try {
+                const doc = await db.collection('users').doc(code).get();
+                if (doc.exists) {
+                    status.innerHTML = '<span style="color: #EF4444;">✗ Already taken. Try another.</span>';
+                } else {
+                    status.innerHTML = '<span style="color: #10B981;">✓ Available!</span>';
+                }
+            } catch(e) {
+                status.innerHTML = '';
+            }
+        }
+
+        // Add live check on username input
+        document.getElementById('username').addEventListener('input', function() {
+            if (isSignup && this.value.length === 3) {
+                checkUsernameAvailability();
+            } else {
+                document.getElementById('usernameStatus').innerHTML = '';
+            }
+        });
+
+        async function submitAuth(isSilent = false) {
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value.trim();
+            const confirmPassword = document.getElementById('confirmPassword').value.trim();
+            
+            if (!username || !/^[0-9]{3}$/.test(username)) {
+                showToast("Please enter a valid 3-digit username (e.g. 420).", "error");
+                return;
+            }
+            if (!password) {
+                showToast("Please enter a password.", "error");
+                return;
+            }
+
+            if (isSignup && password !== confirmPassword) {
+                showToast("Passwords do not match. Please re-check.", "error");
+                return;
+            }
+
+            const btn = document.getElementById('authBtn');
+            const originalText = btn.querySelector('span').innerText;
+            btn.disabled = true;
+            btn.querySelector('span').innerText = isSignup ? "Creating Account..." : "Authenticating...";
+
+            try {
+                if (useFirebase && db) {
+                    const userRef = db.collection('users').doc(username);
+                    const userDoc = await userRef.get();
+
+                    if (isSignup) {
+                        if (userDoc.exists) {
+                            btn.disabled = false;
+                            btn.querySelector('span').innerText = originalText;
+                            showToast("This username is already taken. Please choose another.", "error");
+                            return;
+                        }
+
+                        // Create user doc (username IS the code)
+                        await userRef.set({
+                            password: password,
+                            staticCode: username,
+                            configs: [],
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+
+                        currentAuth = { username, password, staticCode: username };
+                        localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
+                        showToast(`Account created! Your code is ${username}`, "success");
+                        loadDashboard(username, []);
+                        return;
+
+                    } else {
+                        // Login Flow
+                        if (!userDoc.exists) {
+                            btn.disabled = false;
+                            btn.querySelector('span').innerText = originalText;
+                            showToast("Account not found. Please click Sign Up below.", "error");
+                            return;
+                        }
+
+                        const data = userDoc.data();
+                        if (data.password !== password) {
+                            btn.disabled = false;
+                            btn.querySelector('span').innerText = originalText;
+                            showToast("Incorrect password. Please try again.", "error");
+                            return;
+                        }
+
+                        currentAuth = { username, password, staticCode: data.staticCode || username };
+                        localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
+                        if (!isSilent) showToast("Logged in successfully!", "success");
+                        loadDashboard(data.staticCode || username, data.configs || []);
+                        return;
+                    }
+                }
+
+                // Fallback: Vercel serverless API
+                const res = await fetch('/api/auth', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ username, password, action: isSignup ? 'signup' : 'login' })
+                });
+                
+                const data = await res.json();
+                if (!res.ok) {
+                    btn.disabled = false;
+                    btn.querySelector('span').innerText = originalText;
+                    showToast(data.error || "Authentication failed", "error");
+                    return;
+                }
+
+                currentAuth = { username, password, staticCode: data.user.staticCode };
+                localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
+                if (!isSilent) showToast("Logged in successfully!", "success");
+                loadDashboard(data.user.staticCode, data.user.configs || []);
+
+            } catch (err) {
+                console.error("Auth error:", err);
+                btn.disabled = false;
+                btn.querySelector('span').innerText = originalText;
+                showToast("Connection error. Check Firebase configuration in firebaseConfig.js", "error");
+            }
+        }
+
+        // Load Dashboard
+        function loadDashboard(staticCode, configs) {
+            document.getElementById('authView').classList.add('hidden');
+            document.getElementById('configView').classList.remove('hidden');
+            
+            document.getElementById('syncCodeDisplay').innerText = staticCode;
+            document.getElementById('userRollDisplay').innerText = currentAuth.username;
+            document.getElementById('avatarLetter').innerText = currentAuth.username.charAt(0);
+            
+            document.getElementById('configsList').innerHTML = '';
+            configCounter = 0;
+
+            if (configs && configs.length > 0) {
+                configs.forEach(config => addConfigCard(config));
+            } else {
+                addConfigCard(); // 1 default empty card
+            }
+        }
+
+        function copySyncCode() {
+            const code = document.getElementById('syncCodeDisplay').innerText;
+            if (!code || code === '---') return;
+            
+            navigator.clipboard.writeText(code).then(() => {
+                const btnText = document.getElementById('copyBtnText');
+                btnText.innerText = "✓ Copied!";
+                showToast(`Code ${code} copied to clipboard!`, "success", 2000);
+                setTimeout(() => {
+                    btnText.innerText = "Copy 3-Digit Code";
+                }, 2000);
+            }).catch(() => {
+                showToast(`Your 3-digit code is: ${code}`, "info");
+            });
+        }
+
+        function logout() {
+            localStorage.removeItem('neoexam_session');
+            currentAuth = { username: '', password: '', staticCode: '' };
+            document.getElementById('configView').classList.add('hidden');
+            document.getElementById('authView').classList.remove('hidden');
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('confirmPassword').value = '';
+            document.getElementById('authBtn').disabled = false;
+            document.getElementById('authBtn').querySelector('span').innerText = isSignup ? 'Create Account' : 'Login';
+            showToast("Logged out.", "info");
+        }
+
+        // ==========================================
+        // DYNAMIC API CONFIGURATION CARDS
+        // ==========================================
+        function addConfigCard(data = null) {
+            configCounter++;
+            const id = configCounter;
+            const provider = data ? (data.aiProvider || 'google') : 'google';
+            const apiKey = data ? (data.apiKey || '') : '';
+            const modelName = data ? (data.modelName || defaultModels[provider]) : defaultModels[provider];
+            const customEndpoint = data ? (data.customEndpoint || '') : '';
+
+            const card = document.createElement('div');
+            card.className = 'config-card';
+            card.id = `card-${id}`;
+            
+            card.innerHTML = `
+                <div class="card-top">
+                    <div class="card-priority">
+                        <span class="priority-tag">Priority 1</span>
+                    </div>
+                    <div class="card-actions">
+                        <button type="button" class="btn-icon" onclick="moveCardUp(${id})" title="Move Up (Increase Priority)">▲</button>
+                        <button type="button" class="btn-icon" onclick="moveCardDown(${id})" title="Move Down (Decrease Priority)">▼</button>
+                        <button type="button" class="btn-icon delete" onclick="deleteCard(${id})" title="Delete Key">✕</button>
+                    </div>
+                </div>
+
+                <a href="https://aistudio.google.com/app/apikey" target="_blank" class="gemini-quick-btn" id="geminiLink-${id}" style="display: ${provider === 'google' ? 'inline-flex' : 'none'};">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    Get Free Gemini API Key (Google AI Studio)
+                </a>
+
+                <div class="form-group">
+                    <label class="form-label">AI Provider</label>
+                    <select id="provider-${id}" class="form-control" onchange="onProviderChange(${id})">
+                        <option value="google" ${provider === 'google' ? 'selected' : ''}>Google Gemini (Recommended & Fast)</option>
+                        <option value="openai" ${provider === 'openai' ? 'selected' : ''}>OpenAI (ChatGPT)</option>
+                        <option value="anthropic" ${provider === 'anthropic' ? 'selected' : ''}>Anthropic Claude</option>
+                        <option value="deepseek" ${provider === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
+                        <option value="custom" ${provider === 'custom' ? 'selected' : ''}>Custom OpenAI-Compatible Endpoint</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="endpointGroup-${id}" style="display: ${provider === 'custom' ? 'block' : 'none'};">
+                    <label class="form-label">Custom API Endpoint URL</label>
+                    <input type="text" id="endpoint-${id}" class="form-control" placeholder="https://api.yourproxy.com/v1/chat/completions" value="${customEndpoint}">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">API Key</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="apiKey-${id}" class="form-control api-input" placeholder="Paste your API key here" value="${apiKey}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                        <div class="input-actions">
+                            <button type="button" class="btn-paste-pill" onclick="pasteFromClipboard('apiKey-${id}')" title="Click to paste key from clipboard">
+                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                                Paste
+                            </button>
+                            <button type="button" class="toggle-password" style="position: static;" onclick="togglePasswordVisibility('apiKey-${id}', this)" title="Mask / Unmask API Key">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom: 0.75rem;">
+                    <label class="form-label">Model Identifier</label>
+                    <input type="text" id="model-${id}" class="form-control" placeholder="e.g. gemini-2.5-flash" value="${modelName}">
+                </div>
+
+                <div style="display: flex; gap: 8px; margin-top: 0.75rem;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="testBtn-${id}" onclick="testSingleKey(${id})" style="flex: 1;">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                        Test Key Connection
+                    </button>
+                </div>
+            `;
+
+            document.getElementById('configsList').appendChild(card);
+            updatePriorityTags();
+        }
+
+        function onProviderChange(id) {
+            const provider = document.getElementById(`provider-${id}`).value;
+            document.getElementById(`model-${id}`).value = defaultModels[provider] || '';
+            
+            // Show/hide Gemini quick link
+            const geminiBtn = document.getElementById(`geminiLink-${id}`);
+            if (geminiBtn) geminiBtn.style.display = provider === 'google' ? 'inline-flex' : 'none';
+
+            // Show/hide Custom Endpoint field
+            const endpointGroup = document.getElementById(`endpointGroup-${id}`);
+            if (endpointGroup) endpointGroup.style.display = provider === 'custom' ? 'block' : 'none';
+        }
+
+        function deleteCard(id) {
+            const cards = document.querySelectorAll('.config-card');
+            if (cards.length <= 1) {
+                showToast("You must keep at least 1 API key card.", "error");
+                return;
+            }
+            const el = document.getElementById(`card-${id}`);
+            if (el) {
+                el.style.transform = 'scale(0.95)';
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.remove();
+                    updatePriorityTags();
+                }, 150);
+            }
+        }
+
+        function moveCardUp(id) {
+            const card = document.getElementById(`card-${id}`);
+            const prev = card.previousElementSibling;
+            if (prev && prev.classList.contains('config-card')) {
+                card.parentNode.insertBefore(card, prev);
+                updatePriorityTags();
+            }
+        }
+
+        function moveCardDown(id) {
+            const card = document.getElementById(`card-${id}`);
+            const next = card.nextElementSibling;
+            if (next && next.classList.contains('config-card')) {
+                card.parentNode.insertBefore(next, card);
+                updatePriorityTags();
+            }
+        }
+
+        function updatePriorityTags() {
+            const cards = document.querySelectorAll('.config-card');
+            cards.forEach((card, index) => {
+                const tag = card.querySelector('.priority-tag');
+                if (tag) tag.innerText = `Priority ${index + 1}`;
+            });
+        }
+
+        // Test API Key Live
+        async function testSingleKey(id) {
+            const btn = document.getElementById(`testBtn-${id}`);
+            const provider = document.getElementById(`provider-${id}`).value;
+            const apiKey = document.getElementById(`apiKey-${id}`).value.trim();
+            const modelName = document.getElementById(`model-${id}`).value.trim();
+            const endpoint = document.getElementById(`endpoint-${id}`) ? document.getElementById(`endpoint-${id}`).value.trim() : '';
+
+            if (!apiKey) {
+                showToast("Please paste an API key first to test.", "error");
+                return;
+            }
+
+            const originalHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span style="display: inline-block; animation: spin 1s linear infinite;">⏳</span> Testing...`;
+
+            try {
+                let success = false;
+                let errorMsg = '';
+
+                // Direct client testing for Google Gemini
+                if (provider === 'google') {
+                    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-2.5-flash'}:generateContent?key=${apiKey}`;
+                    const res = await fetch(testUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ contents: [{ parts: [{ text: 'Reply with YES' }] }] })
+                    });
+                    
+                    if (res.ok) {
+                        success = true;
+                    } else {
+                        const errData = await res.json().catch(() => ({}));
+                        errorMsg = errData.error?.message || `HTTP ${res.status}`;
+                    }
+                } else if (provider === 'openai') {
+                    const testUrl = 'https://api.openai.com/v1/chat/completions';
+                    const res = await fetch(testUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify({
+                            model: modelName || 'gpt-4o-mini',
+                            messages: [{ role: 'user', content: 'Say YES' }],
+                            max_tokens: 5
+                        })
+                    });
+                    if (res.ok) success = true;
+                    else {
+                        const errData = await res.json().catch(() => ({}));
+                        errorMsg = errData.error?.message || `HTTP ${res.status}`;
+                    }
+                } else {
+                    // Try via backend proxy for Anthropic / Deepseek / Custom
+                    const res = await fetch('/api/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ provider, apiKey, modelName, endpoint })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (res.ok && data.success) success = true;
+                    else errorMsg = data.error || 'Connection failed';
+                }
+
+                if (success) {
+                    btn.innerHTML = `✓ Verified & Working!`;
+                    btn.style.background = 'var(--success-bg)';
+                    btn.style.color = 'var(--success)';
+                    btn.style.borderColor = 'var(--success)';
+                    showToast(`Priority ${document.getElementById(`card-${id}`).querySelector('.priority-tag').innerText.replace('Priority ', '')} Key verified!`, 'success');
+                } else {
+                    btn.innerHTML = `✕ Test Failed`;
+                    btn.style.background = 'var(--danger-bg)';
+                    btn.style.color = 'var(--danger)';
+                    btn.style.borderColor = 'var(--danger)';
+                    showToast(`API Test Failed: ${errorMsg}`, 'error', 5000);
+                }
+
+            } catch (e) {
+                console.error("Test key error:", e);
+                btn.innerHTML = `✕ Connection Error`;
+                btn.style.background = 'var(--danger-bg)';
+                btn.style.color = 'var(--danger)';
+                showToast(`Test error: ${e.message}`, 'error');
+            }
+
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                btn.style.background = '';
+                btn.style.color = '';
+                btn.style.borderColor = '';
+            }, 3000);
+        }
+
+        // ==========================================
+        // SAVE ALL SETTINGS TO FIRESTORE
+        // ==========================================
+        async function saveSettings() {
+            const configs = [];
+            const cards = document.querySelectorAll('.config-card');
+
+            cards.forEach(card => {
+                const id = card.id.replace('card-', '');
+                const apiKey = document.getElementById(`apiKey-${id}`).value.trim();
+                const provider = document.getElementById(`provider-${id}`).value;
+                const modelName = document.getElementById(`model-${id}`).value.trim();
+                const customEndpoint = document.getElementById(`endpoint-${id}`) ? document.getElementById(`endpoint-${id}`).value.trim() : '';
+
+                if (apiKey) {
+                    configs.push({
+                        aiProvider: provider,
+                        apiKey: apiKey,
+                        modelName: modelName || defaultModels[provider],
+                        customEndpoint: customEndpoint
+                    });
+                }
+            });
+
+            if (configs.length === 0) {
+                showToast("Please enter at least 1 valid API key before saving.", "error");
+                return;
+            }
+
+            const newPassword = document.getElementById('newPassword').value.trim();
+            const btn = document.getElementById('saveBtn');
+            const originalHTML = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = `<span>Saving to Cloud...</span>`;
+
+            try {
+                if (useFirebase && db) {
+                    const userRef = db.collection('users').doc(currentAuth.username);
+                    const updatePayload = {
+                        configs: configs,
+                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                    };
+
+                    if (newPassword) {
+                        updatePayload.password = newPassword;
+                    }
+
+                    await userRef.update(updatePayload);
+
+                    if (newPassword) {
+                        currentAuth.password = newPassword;
+                        localStorage.setItem('neoexam_session', JSON.stringify({ username: currentAuth.username, password: newPassword }));
+                        document.getElementById('newPassword').value = '';
+                        document.getElementById('securityFields').classList.add('hidden');
+                        document.getElementById('securityChevron').innerText = '▼';
+                    }
+
+                    btn.innerHTML = `✓ Changes Saved!`;
+                    btn.style.background = 'var(--success)';
+                    showToast("All API keys & priority order saved successfully!", "success");
+
+                } else {
+                    // Fallback to Vercel API
+                    const res = await fetch('/api/save', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: currentAuth.username,
+                            password: currentAuth.password,
+                            newPassword: newPassword,
+                            configs: configs
+                        })
+                    });
+
+                    const data = await res.json();
+                    if (!res.ok) {
+                        showToast(data.error || "Failed to save settings", "error");
+                        btn.disabled = false;
+                        btn.innerHTML = originalHTML;
+                        return;
+                    }
+
+                    if (newPassword) {
+                        currentAuth.password = newPassword;
+                        localStorage.setItem('neoexam_session', JSON.stringify({ username: currentAuth.username, password: newPassword }));
+                        document.getElementById('newPassword').value = '';
+                    }
+
+                    btn.innerHTML = `✓ Changes Saved!`;
+                    btn.style.background = 'var(--success)';
+                    showToast("Settings saved successfully!", "success");
+                }
+
+            } catch (err) {
+                console.error("Save error:", err);
+                showToast(`Failed to save: ${err.message}`, "error");
+            }
+
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                btn.style.background = '';
+            }, 2500);
+        }
+
+        // Toggle Fast Setup Guide on Dashboard
+        function toggleSetupGuide() {
+            const body = document.getElementById('setupGuideContent');
+            const chevron = document.getElementById('setupGuideChevron');
+            if (body.classList.contains('hidden')) {
+                body.classList.remove('hidden');
+                chevron.style.transform = 'rotate(0deg)';
+            } else {
+                body.classList.add('hidden');
+                chevron.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        // Toggle Fast Setup Guide on Auth View
+        function toggleAuthSetupGuide() {
+            const body = document.getElementById('authSetupGuideContent');
+            const chevron = document.getElementById('authSetupGuideChevron');
+            if (body.classList.contains('hidden')) {
+                body.classList.remove('hidden');
+                chevron.innerText = '▲';
+            } else {
+                body.classList.add('hidden');
+                chevron.innerText = '▼';
+            }
+        }
+    </script>
+</body>
+</html>
