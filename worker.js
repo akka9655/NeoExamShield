@@ -1816,16 +1816,17 @@ let activeToastId = null;
 
 // Function to remove any existing toast
 function removeExistingToast(tabId) {
-    chrome.scripting.executeScript({
+    return chrome.scripting.executeScript({
         target: { tabId: tabId },
         func: function() {
             // Remove all possible toast types
             const toastSelectors = [
                 '#neopass-active-toast',
+                '#neopass-spinner-toast',
                 '#stealth-mode-toast',
                 '.neopass-update-toast',
-                '[id*="toast"]',
-                '[class*="toast"]'
+                '[id*="neopass-"]',
+                '[id*="toast"]'
             ];
             
             toastSelectors.forEach(selector => {
@@ -1833,17 +1834,17 @@ function removeExistingToast(tabId) {
                 existingToasts.forEach(toast => {
                     if (toast && toast.parentNode) {
                         toast.style.opacity = '0';
-                        toast.style.transform = 'translateY(10px) translateX(-50%)';
+                        toast.style.transform = 'translate(-50%, -8px)';
                         setTimeout(() => {
                             if (toast.parentNode) {
                                 toast.remove();
                             }
-                        }, 100);
+                        }, 120);
                     }
                 });
             });
         }
-    });
+    }).catch(() => {});
 }
 
 // Function to toggle and store toast opacity level
@@ -1903,374 +1904,156 @@ function showOpacityLevelToast(tabId, message) {
             tabId: tabId
         },
         func: function(msg, opacityLevel) {
-            // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neopass-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacityLevel;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '320px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'center';
-            
-            // Create message container with icon
-            const messageContainer = document.createElement('div');
-            messageContainer.style.display = 'flex';
-            messageContainer.style.alignItems = 'center';
-            messageContainer.style.gap = '10px';
-            messageContainer.style.flexGrow = '1';
-            
-            // Settings icon (blue indicator dot)
-            const settingsIcon = document.createElement('span');
-            settingsIcon.style.display = 'inline-block';
-            settingsIcon.style.width = '8px';
-            settingsIcon.style.height = '8px';
-            settingsIcon.style.backgroundColor = '#64b5f6';
-            settingsIcon.style.borderRadius = '50%';
-            settingsIcon.style.boxShadow = '0 0 4px rgba(100, 181, 246, 0.6)';
-            
-            // Message text
-            const messageText = document.createElement('span');
-            messageText.textContent = msg;
-            messageText.style.fontSize = '14px';
-            messageText.style.fontWeight = '500';
-            messageText.style.lineHeight = '1.4';
-            messageText.style.wordBreak = 'break-word';
-            
-            messageContainer.appendChild(settingsIcon);
-            messageContainer.appendChild(messageText);
-            
-            // Close button
-            const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-            closeBtn.title = 'Close';
-            closeBtn.style.background = 'none';
-            closeBtn.style.border = 'none';
-            closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-            closeBtn.style.cursor = 'pointer';
-            closeBtn.style.padding = '2px';
-            closeBtn.style.marginLeft = '8px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
-            
-            // Create opacity indicator using text badges
-            const opacityIndicator = document.createElement('div');
-            opacityIndicator.style.marginTop = '10px';
-            opacityIndicator.style.width = '100%';
-            opacityIndicator.style.display = 'flex';
-            opacityIndicator.style.alignItems = 'center';
-            opacityIndicator.style.justifyContent = 'space-between';
-            opacityIndicator.style.gap = '8px';
-            
-            // Helper function to create opacity badge
-            function createOpacityBadge(level, text, isActive) {
-                const badge = document.createElement('div');
-                badge.textContent = text;
-                badge.style.fontSize = '11px';
-                badge.style.padding = '3px 6px';
-                badge.style.borderRadius = '4px';
-                badge.style.fontWeight = isActive ? '600' : '400';
-                
-                if (isActive) {
-                    badge.style.backgroundColor = 'rgba(255, 255, 255, 0.15)';
-                    badge.style.color = 'white';
-                } else {
-                    badge.style.backgroundColor = 'rgba(255, 255, 255, 0.05)';
-                    badge.style.color = 'rgba(255, 255, 255, 0.5)';
-                }
-                
-                return badge;
-            }
-            
-            // Add opacity level indicators
-            const lowBadge = createOpacityBadge('low', 'Low', opacityLevel <= 0.2);
-            const mediumBadge = createOpacityBadge('medium', 'Medium', opacityLevel > 0.2 && opacityLevel < 1.0);
-            const highBadge = createOpacityBadge('high', 'High', opacityLevel >= 1.0);
-            
-            opacityIndicator.appendChild(lowBadge);
-            opacityIndicator.appendChild(mediumBadge);
-            opacityIndicator.appendChild(highBadge);
-            
-            // Event listeners
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onclick = function() {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            };
-            
-            // Assemble the toast
-            headerContainer.appendChild(messageContainer);
-            headerContainer.appendChild(closeBtn);
-            
-            toast.appendChild(headerContainer);
-            toast.appendChild(opacityIndicator);
-            
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '260px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
+            const dot = document.createElement('span');
+            dot.style.display = 'inline-block';
+            dot.style.width = '6px';
+            dot.style.height = '6px';
+            dot.style.backgroundColor = '#1686ff';
+            dot.style.borderRadius = '50%';
+            dot.style.flexShrink = '0';
+
+            const text = document.createElement('span');
+            text.textContent = msg;
+            text.style.fontSize = '11px';
+            text.style.fontWeight = '500';
+            text.style.color = '#374151';
+
+            toast.appendChild(dot);
+            toast.appendChild(text);
             document.body.appendChild(toast);
-            
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
+
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
-            
-            // Auto-hide toast after a delay
-            let hideTimeoutId = setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 3000);
+
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translate(-50%, -8px)';
+                    setTimeout(() => toast.remove(), 200);
+                }
+            }, 2500);
         },
         args: [message, opacityLevels[currentOpacityLevel]]
     });
 }
 
-// Update existing showToast function to use the current opacity level
+// Update existing showToast function to use Neo PAT portal theme
 async function showToast(tabId, message, isError = false, detailedInfo = '') {
     const opacity = await getToastOpacity();
-    
-    // Set default detailed info if not provided
-    if (!detailedInfo) {
-        if (isError) {
-            detailedInfo = 'Possible causes:\n• Network connection issues\n• Server timeout\n• Authorization issues\n• Extension needs to be updated';
-        } else {
-            detailedInfo = 'Operation completed successfully.';
-        }
-    }
-
-    // Remove any existing toast first
     await removeExistingToast(tabId);
 
     chrome.scripting.executeScript({
         target: {
             tabId: tabId
         },
-        func: function(msg, isError, opacity, detailedInfo) {
-            // Create toast container
+        func: function(msg, isError, opacity) {
             const toast = document.createElement('div');
-            toast.id = 'neopass-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = isError ? 'rgba(40, 10, 10, 0.95)' : 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = isError ? '#ff6b6b' : '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 8px 4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacity;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '320px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = isError ? '1px solid rgba(255, 107, 107, 0.2)' : '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'flex-start';
-            
-            // Create message container
-            const messageContainer = document.createElement('div');
-            messageContainer.style.flexGrow = '1';
-            messageContainer.style.marginRight = '12px';
-            
-            // Add indicator dot
-            const indicatorDot = document.createElement('span');
-            indicatorDot.style.display = 'inline-block';
-            indicatorDot.style.width = '8px';
-            indicatorDot.style.height = '8px';
-            indicatorDot.style.backgroundColor = isError ? '#ff6b6b' : '#4ade80';
-            indicatorDot.style.borderRadius = '50%';
-            indicatorDot.style.marginRight = '8px';
-            indicatorDot.style.boxShadow = isError ? '0 0 4px rgba(255, 107, 107, 0.6)' : '0 0 4px rgba(74, 222, 128, 0.6)';
-            
-            // Add message text
-            const messageText = document.createElement('span');
-            messageText.textContent = msg;
-            messageText.style.fontSize = '14px';
-            messageText.style.fontWeight = '500';
-            messageText.style.lineHeight = '1.4';
-            messageText.style.wordBreak = 'break-word';
-            
-            // Combine dot and text
-            const messageContent = document.createElement('div');
-            messageContent.style.display = 'flex';
-            messageContent.style.alignItems = 'center';
-            messageContent.appendChild(indicatorDot);
-            messageContent.appendChild(messageText);
-            
-            messageContainer.appendChild(messageContent);
-            
-            // Create buttons container
-            const buttonsContainer = document.createElement('div');
-            buttonsContainer.style.display = 'flex';
-            buttonsContainer.style.alignItems = 'center';
-            buttonsContainer.style.marginLeft = '8px';
-            
-            // Info button
-            const infoBtn = document.createElement('button');
-            infoBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-            infoBtn.title = 'Show more information';
-            infoBtn.style.background = 'none';
-            infoBtn.style.border = 'none';
-            infoBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-            infoBtn.style.cursor = 'pointer';
-            infoBtn.style.padding = '2px';
-            infoBtn.style.marginRight = '6px';
-            infoBtn.style.borderRadius = '4px';
-            infoBtn.style.lineHeight = '0';
-            infoBtn.style.transition = 'all 0.2s';
-            
-            // Close button
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '280px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = isError ? '1px solid #fecaca' : '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
+            const dot = document.createElement('span');
+            dot.style.display = 'inline-block';
+            dot.style.width = '6px';
+            dot.style.height = '6px';
+            dot.style.backgroundColor = isError ? '#ef4444' : '#10b981';
+            dot.style.borderRadius = '50%';
+            dot.style.flexShrink = '0';
+
+            const text = document.createElement('span');
+            text.textContent = msg;
+            text.style.fontSize = '11px';
+            text.style.fontWeight = '500';
+            text.style.color = isError ? '#b91c1c' : '#374151';
+            text.style.whiteSpace = 'nowrap';
+            text.style.overflow = 'hidden';
+            text.style.textOverflow = 'ellipsis';
+            text.style.maxWidth = '220px';
+
             const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
             closeBtn.title = 'Close';
             closeBtn.style.background = 'none';
             closeBtn.style.border = 'none';
-            closeBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+            closeBtn.style.color = '#9ca3af';
             closeBtn.style.cursor = 'pointer';
             closeBtn.style.padding = '2px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
+            closeBtn.style.display = 'flex';
+            closeBtn.style.alignItems = 'center';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.flexShrink = '0';
+            closeBtn.style.marginLeft = 'auto';
 
-            // Detailed info container (initially hidden)
-            const detailedInfoContainer = document.createElement('div');
-            detailedInfoContainer.style.marginTop = '12px';
-            detailedInfoContainer.style.padding = '10px 12px';
-            detailedInfoContainer.style.backgroundColor = isError ? 'rgba(255, 107, 107, 0.1)' : 'rgba(255, 255, 255, 0.1)';
-            detailedInfoContainer.style.borderRadius = '6px';
-            detailedInfoContainer.style.fontSize = '13px';
-            detailedInfoContainer.style.display = 'none';
-            detailedInfoContainer.style.maxHeight = '120px';
-            detailedInfoContainer.style.overflow = 'auto';
-            detailedInfoContainer.style.lineHeight = '1.4';
-            detailedInfoContainer.style.color = isError ? 'rgba(255, 107, 107, 0.9)' : 'rgba(255, 255, 255, 0.9)';
-            detailedInfoContainer.textContent = detailedInfo;
-
-            // Add event listeners
-            let expanded = false;
-            let hideTimeoutId = null;
-            
-            infoBtn.onmouseover = function() {
-                infoBtn.style.color = isError ? '#ff6b6b' : '#ffffff';
-                infoBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            infoBtn.onmouseout = function() {
-                infoBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                infoBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = isError ? '#ff6b6b' : '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            infoBtn.onclick = function() {
-                expanded = !expanded;
-                detailedInfoContainer.style.display = expanded ? 'block' : 'none';
-                infoBtn.innerHTML = expanded ? 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-                
-                // Clear the auto-hide timeout when info is expanded
-                if (expanded) {
-                    if (hideTimeoutId) {
-                        clearTimeout(hideTimeoutId);
-                        hideTimeoutId = null;
-                    }
-                } else {
-                    // Restart the auto-hide timer when info is collapsed
-                    hideTimeoutId = setTimeout(() => {
-                        toast.style.opacity = '0';
-                        toast.style.transform = 'translateY(10px) translateX(-50%)';
-                        setTimeout(() => toast.remove(), 300);
-                    }, 5000);
-                }
-            };
-            
-            closeBtn.onclick = function() {
-                // Clear any existing timeout
-                if (hideTimeoutId) {
-                    clearTimeout(hideTimeoutId);
-                    hideTimeoutId = null;
-                }
-                
+            closeBtn.onmouseover = () => { closeBtn.style.color = '#374151'; };
+            closeBtn.onmouseout = () => { closeBtn.style.color = '#9ca3af'; };
+            closeBtn.onclick = () => {
                 toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
+                toast.style.transform = 'translate(-50%, -8px)';
+                setTimeout(() => toast.remove(), 200);
             };
 
-            // Assemble the toast
-            buttonsContainer.appendChild(infoBtn);
-            buttonsContainer.appendChild(closeBtn);
-            headerContainer.appendChild(messageContainer);
-            headerContainer.appendChild(buttonsContainer);
-            
-            toast.appendChild(headerContainer);
-            toast.appendChild(detailedInfoContainer);
-            
+            toast.appendChild(dot);
+            toast.appendChild(text);
+            toast.appendChild(closeBtn);
             document.body.appendChild(toast);
 
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
 
-            // Set initial auto-hide timeout
-            hideTimeoutId = setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translate(-50%, -8px)';
+                    setTimeout(() => toast.remove(), 200);
+                }
+            }, 3500);
         },
-        args: [message, isError, opacity, detailedInfo]
+        args: [message, isError, opacity]
     });
 }
 
-// Show stealth mode toast notification
+// Show stealth mode toast notification in Neo PAT portal theme
 async function showStealthToast(tabId, message, stealthEnabled) {
     const opacity = await getToastOpacity();
-    
-    // Remove any existing toast first
     await removeExistingToast(tabId);
 
     chrome.scripting.executeScript({
@@ -2278,118 +2061,83 @@ async function showStealthToast(tabId, message, stealthEnabled) {
             tabId: tabId
         },
         func: function(msg, stealthEnabled, opacity) {
-            // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neopass-active-toast'; // Use same ID for tracking
-            
-            // Set colors based on stealth mode state
-            const textColor = stealthEnabled ? '#4ade80' : '#ff6b6b';
-            
+            toast.id = 'neopass-active-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 8px 4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacity;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '480px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'center';
-            
-            // Create message container with icon
-            const messageContainer = document.createElement('div');
-            messageContainer.style.display = 'flex';
-            messageContainer.style.alignItems = 'center';
-            messageContainer.style.gap = '10px';
-            messageContainer.style.flexGrow = '1';
-            messageContainer.style.marginRight = '12px';
-            
-            // Add indicator dot
-            const indicatorDot = document.createElement('span');
-            indicatorDot.style.display = 'inline-block';
-            indicatorDot.style.width = '8px';
-            indicatorDot.style.height = '8px';
-            indicatorDot.style.backgroundColor = textColor;
-            indicatorDot.style.borderRadius = '50%';
-            indicatorDot.style.boxShadow = `0 0 4px ${stealthEnabled ? 'rgba(74, 222, 128, 0.6)' : 'rgba(255, 107, 107, 0.6)'}`;
-            
-            // Message text
-            const messageText = document.createElement('span');
-            messageText.innerHTML = msg.replace(/\n/g, '<br>');
-            messageText.style.fontSize = '14px';
-            messageText.style.fontWeight = '500';
-            messageText.style.lineHeight = '1.4';
-            messageText.style.wordBreak = 'break-word';
-            messageText.style.color = textColor;
-            messageText.style.textAlign = 'center';
-            messageText.style.flex = '1';
-            
-            messageContainer.appendChild(indicatorDot);
-            messageContainer.appendChild(messageText);
-            
-            // Close button
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '280px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
+            const dot = document.createElement('span');
+            dot.style.display = 'inline-block';
+            dot.style.width = '6px';
+            dot.style.height = '6px';
+            dot.style.backgroundColor = stealthEnabled ? '#10b981' : '#f59e0b';
+            dot.style.borderRadius = '50%';
+            dot.style.flexShrink = '0';
+
+            const text = document.createElement('span');
+            text.textContent = msg.replace(/\n/g, ' ');
+            text.style.fontSize = '11px';
+            text.style.fontWeight = '500';
+            text.style.color = '#374151';
+            text.style.whiteSpace = 'nowrap';
+            text.style.overflow = 'hidden';
+            text.style.textOverflow = 'ellipsis';
+            text.style.maxWidth = '220px';
+
             const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
             closeBtn.title = 'Close';
             closeBtn.style.background = 'none';
             closeBtn.style.border = 'none';
-            closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
+            closeBtn.style.color = '#9ca3af';
             closeBtn.style.cursor = 'pointer';
             closeBtn.style.padding = '2px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
-            
-            // Event listeners
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onclick = function() {
+            closeBtn.style.display = 'flex';
+            closeBtn.style.alignItems = 'center';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.flexShrink = '0';
+            closeBtn.style.marginLeft = 'auto';
+
+            closeBtn.onmouseover = () => { closeBtn.style.color = '#374151'; };
+            closeBtn.onmouseout = () => { closeBtn.style.color = '#9ca3af'; };
+            closeBtn.onclick = () => {
                 toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
+                toast.style.transform = 'translate(-50%, -8px)';
+                setTimeout(() => toast.remove(), 200);
             };
-            
-            // Assemble the toast
-            headerContainer.appendChild(messageContainer);
-            headerContainer.appendChild(closeBtn);
-            
-            toast.appendChild(headerContainer);
-            
+
+            toast.appendChild(dot);
+            toast.appendChild(text);
+            toast.appendChild(closeBtn);
             document.body.appendChild(toast);
 
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
 
-            // Auto-hide toast after 5 seconds
             setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translate(-50%, -8px)';
+                    setTimeout(() => toast.remove(), 200);
+                }
+            }, 3500);
         },
         args: [message, stealthEnabled, opacity]
     });
@@ -2778,588 +2526,313 @@ async function loadNptelDataset() {
 // Load dataset on initialization
 loadNptelDataset();
 
-// Update showMCQToast to use the current opacity level and include info button
+// Update showMCQToast to use Neo PAT portal theme (top, compact, native Examly header style)
 async function showMCQToast(tabId, message, detailedInfo = '') {
     const opacity = await getToastOpacity();
-    
-    // Set default detailed info if not provided
-    if (!detailedInfo) {
-        detailedInfo = 'This is the answer to the MCQ question based on analysis of the question content. If you received an incorrect answer, please try rephrasing your question or providing more context.';
-    }
-
-    // Remove any existing toast first
     await removeExistingToast(tabId);
 
     chrome.scripting.executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: function(msg, opacity, detailedInfo) {
-            // Check if this is "Not an MCQ" response
-            const isNotMCQ = msg.toLowerCase().includes("not an mcq");
+        target: { tabId: tabId },
+        func: function(msg, opacity) {
+            const isNotMCQ = msg.toLowerCase().includes("not an mcq") || msg.toLowerCase().includes("no mcq detected");
             
-            // Create toast container
             const toast = document.createElement('div');
-            toast.id = 'neopass-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 8px 4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacity;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '400px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'center';
-            
-            // Create answer container with formatted answer
-            const answerContainer = document.createElement('div');
-            answerContainer.style.display = 'flex';
-            answerContainer.style.alignItems = 'center';
-            answerContainer.style.flexGrow = '1';
-            
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '320px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
+            const contentContainer = document.createElement('div');
+            contentContainer.style.display = 'flex';
+            contentContainer.style.alignItems = 'center';
+            contentContainer.style.gap = '6px';
+            contentContainer.style.flexGrow = '1';
+            contentContainer.style.overflow = 'hidden';
+
             if (!isNotMCQ) {
-                // Parse the message to separate option identifier from answer text
-                let optionIdentifier, optionAnswer;
-                
-                // Handle different format patterns like "A. answer", "1. answer", "A answer", "1 answer"
-                const match = msg.match(/^([A-Za-z0-9]+)\.?\s+(.+)$/);
-                
-                if (match) {
-                    optionIdentifier = match[1].trim();
-                    optionAnswer = match[2].trim();
-                } else {
-                    // Fallback if the pattern doesn't match
-                    const parts = msg.split(' ');
-                    optionIdentifier = parts[0].replace('.', '');
-                    optionAnswer = parts.slice(1).join(' ');
+                let optionLabel = '';
+                let answerText = (msg || '').trim();
+
+                if (answerText.includes('\n')) {
+                    const lines = answerText.split('\n').map(l => l.trim()).filter(Boolean);
+                    answerText = lines[lines.length - 1];
                 }
-                
-                // Determine if option is letter or number based
-                const isLetter = /^[A-Za-z]$/.test(optionIdentifier);
-                const optionColor = isLetter ? '#4285f4' : '#f4b400'; // Blue for letters, Yellow/Gold for numbers
-                
-                // Option indicator dot
-                const optionDot = document.createElement('div');
-                optionDot.style.width = '22px';
-                optionDot.style.height = '22px';
-                optionDot.style.backgroundColor = optionColor;
-                optionDot.style.color = 'white';
-                optionDot.style.borderRadius = '50%';
-                optionDot.style.display = 'flex';
-                optionDot.style.alignItems = 'center';
-                optionDot.style.justifyContent = 'center';
-                optionDot.style.marginRight = '10px';
-                optionDot.style.fontWeight = 'bold';
-                optionDot.style.fontSize = '12px';
-                optionDot.style.boxShadow = `0 2px 4px ${optionColor}66`;
-                optionDot.textContent = optionIdentifier.toUpperCase();
-                
-                // Answer text
-                const answerText = document.createElement('span');
-                answerText.textContent = optionAnswer;
-                answerText.style.fontSize = '14px';
-                answerText.style.fontWeight = '500';
-                
-                answerContainer.appendChild(optionDot);
-                answerContainer.appendChild(answerText);
+
+                const optMatch = answerText.match(/^(?:Option|Choice)\s*([1-9]|[A-D])[:\.\-\s]*(.*)$/i) ||
+                                 answerText.match(/^([1-9]|[A-D])[\.\:\)]\s*(.+)$/i);
+
+                if (optMatch) {
+                    const val = optMatch[1].toUpperCase();
+                    optionLabel = `Option ${val}`;
+                    answerText = (optMatch[2] || '').trim();
+                } else if (/^[1-9]|[A-D]$/i.test(answerText)) {
+                    optionLabel = `Option ${answerText.toUpperCase()}`;
+                    answerText = '';
+                } else {
+                    optionLabel = 'Option';
+                }
+
+                const badge = document.createElement('span');
+                badge.textContent = optionLabel;
+                badge.style.backgroundColor = '#e8f2ff';
+                badge.style.color = '#1686ff';
+                badge.style.border = '1px solid #bfdbfe';
+                badge.style.fontWeight = '700';
+                badge.style.fontSize = '10.5px';
+                badge.style.padding = '1px 6px';
+                badge.style.borderRadius = '4px';
+                badge.style.whiteSpace = 'nowrap';
+                badge.style.flexShrink = '0';
+                contentContainer.appendChild(badge);
+
+                if (answerText) {
+                    const textSpan = document.createElement('span');
+                    textSpan.textContent = answerText;
+                    textSpan.style.fontSize = '11px';
+                    textSpan.style.fontWeight = '500';
+                    textSpan.style.color = '#374151';
+                    textSpan.style.whiteSpace = 'nowrap';
+                    textSpan.style.overflow = 'hidden';
+                    textSpan.style.textOverflow = 'ellipsis';
+                    textSpan.style.maxWidth = '200px';
+                    contentContainer.appendChild(textSpan);
+                }
             } else {
-                // For "Not an MCQ" response - no icon, just show the text
-                const messageText = document.createElement('span');
-                messageText.textContent = msg;
-                messageText.style.fontSize = '14px';
-                messageText.style.fontWeight = '500';
-                
-                answerContainer.appendChild(messageText);
+                const dot = document.createElement('span');
+                dot.style.display = 'inline-block';
+                dot.style.width = '6px';
+                dot.style.height = '6px';
+                dot.style.backgroundColor = '#f59e0b';
+                dot.style.borderRadius = '50%';
+                dot.style.flexShrink = '0';
+                contentContainer.appendChild(dot);
+
+                const textSpan = document.createElement('span');
+                textSpan.textContent = msg;
+                textSpan.style.fontSize = '11px';
+                textSpan.style.fontWeight = '500';
+                textSpan.style.color = '#4b5563';
+                textSpan.style.whiteSpace = 'nowrap';
+                textSpan.style.overflow = 'hidden';
+                textSpan.style.textOverflow = 'ellipsis';
+                textSpan.style.maxWidth = '230px';
+                contentContainer.appendChild(textSpan);
             }
-            
-            // Create buttons container
-            const buttonsContainer = document.createElement('div');
-            buttonsContainer.style.display = 'flex';
-            buttonsContainer.style.alignItems = 'center';
-            buttonsContainer.style.marginLeft = '10px';
-            
-            // Info button
-            const infoBtn = document.createElement('button');
-            infoBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-            infoBtn.title = 'Show more information';
-            infoBtn.style.background = 'none';
-            infoBtn.style.border = 'none';
-            infoBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-            infoBtn.style.cursor = 'pointer';
-            infoBtn.style.padding = '2px';
-            infoBtn.style.marginRight = '6px';
-            infoBtn.style.borderRadius = '4px';
-            infoBtn.style.lineHeight = '0';
-            infoBtn.style.transition = 'all 0.2s';
-            
-            // Close button
+
             const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
             closeBtn.title = 'Close';
             closeBtn.style.background = 'none';
             closeBtn.style.border = 'none';
-            closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
+            closeBtn.style.color = '#9ca3af';
             closeBtn.style.cursor = 'pointer';
             closeBtn.style.padding = '2px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
-            
-            // Detailed info container (initially hidden)
-            const detailedInfoContainer = document.createElement('div');
-            detailedInfoContainer.style.marginTop = '12px';
-            detailedInfoContainer.style.padding = '10px 12px';
-            detailedInfoContainer.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            detailedInfoContainer.style.borderRadius = '6px';
-            detailedInfoContainer.style.fontSize = '13px';
-            detailedInfoContainer.style.display = 'none';
-            detailedInfoContainer.style.maxHeight = '120px';
-            detailedInfoContainer.style.overflow = 'auto';
-            detailedInfoContainer.style.lineHeight = '1.4';
-            detailedInfoContainer.style.color = 'rgba(255, 255, 255, 0.9)';
-            detailedInfoContainer.textContent = isNotMCQ ? 
-                'The selected text does not appear to be a multiple-choice question. Please try selecting a valid MCQ.' : 
-                detailedInfo;
-            
-            // Add event listeners
-            let expanded = false;
-            let hideTimeoutId = null;
-            
-            infoBtn.onmouseover = function() {
-                infoBtn.style.color = '#ffffff';
-                infoBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            infoBtn.onmouseout = function() {
-                infoBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-                infoBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            infoBtn.onclick = function() {
-                expanded = !expanded;
-                detailedInfoContainer.style.display = expanded ? 'block' : 'none';
-                infoBtn.innerHTML = expanded ? 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-                
-                // Clear the auto-hide timeout when info is expanded
-                if (expanded) {
-                    if (hideTimeoutId) {
-                        clearTimeout(hideTimeoutId);
-                        hideTimeoutId = null;
-                    }
-                } else {
-                    // Restart the auto-hide timer when info is collapsed
-                    hideTimeoutId = setTimeout(() => {
-                        toast.style.opacity = '0';
-                        toast.style.transform = 'translateY(10px) translateX(-50%)';
-                        setTimeout(() => toast.remove(), 300);
-                    }, 5000);
-                }
-            };
-            
-            closeBtn.onclick = function() {
-                // Clear any existing timeout
-                if (hideTimeoutId) {
-                    clearTimeout(hideTimeoutId);
-                    hideTimeoutId = null;
-                }
-                
+            closeBtn.style.display = 'flex';
+            closeBtn.style.alignItems = 'center';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.flexShrink = '0';
+            closeBtn.style.marginLeft = 'auto';
+
+            closeBtn.onmouseover = () => { closeBtn.style.color = '#374151'; };
+            closeBtn.onmouseout = () => { closeBtn.style.color = '#9ca3af'; };
+            closeBtn.onclick = () => {
                 toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
+                toast.style.transform = 'translate(-50%, -8px)';
+                setTimeout(() => toast.remove(), 200);
             };
-            
-            // Assemble the toast
-            buttonsContainer.appendChild(infoBtn);
-            buttonsContainer.appendChild(closeBtn);
-            headerContainer.appendChild(answerContainer);
-            headerContainer.appendChild(buttonsContainer);
-            
-            toast.appendChild(headerContainer);
-            toast.appendChild(detailedInfoContainer);
-            
+
+            toast.appendChild(contentContainer);
+            toast.appendChild(closeBtn);
             document.body.appendChild(toast);
-            
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
+
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
 
-            // Set initial auto-hide timeout
-            hideTimeoutId = setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translate(-50%, -8px)';
+                    setTimeout(() => toast.remove(), 200);
+                }
+            }, 4500);
         },
-        args: [message, opacity, detailedInfo]
+        args: [message, opacity]
     });
 }
 
-// Update showNPTELToast to use the current opacity level and include info button
+// Update showNPTELToast to use Neo PAT portal theme
 async function showNPTELToast(tabId, message, isError = false, detailedInfo = '') {
     const opacity = await getToastOpacity();
-    
-    // Set default detailed info if not provided
-    if (!detailedInfo) {
-        if (isError) {
-            detailedInfo = 'Possible issues with NPTEL search:\n• The question may not be in our database\n• Try selecting only the exact question text\n• The question might be newly added to NPTEL';
-        } else {
-            detailedInfo = 'This answer was found by matching your question with the NPTEL question database. The confidence level depends on how closely your selected text matches a known question.';
-        }
-    }
-
-    // Remove any existing toast first
     await removeExistingToast(tabId);
 
     chrome.scripting.executeScript({
-        target: {
-            tabId: tabId
-        },
-        func: function(msg, isError, opacity, detailedInfo) {
-            // Create toast container
+        target: { tabId: tabId },
+        func: function(msg, isError, opacity) {
             const toast = document.createElement('div');
-            toast.id = 'neopass-active-toast'; // Add ID for tracking
+            toast.id = 'neopass-active-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = isError ? 'rgba(40, 10, 10, 0.95)' : 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = isError ? '#ff6b6b' : '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 8px 4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacity;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '320px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = isError ? '1px solid rgba(255, 107, 107, 0.2)' : '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'flex-start';
-            
-            // Create message container
-            const messageContainer = document.createElement('div');
-            messageContainer.style.flexGrow = '1';
-            messageContainer.style.marginRight = '12px';
-            
-            // Add indicator dot
-            const indicatorDot = document.createElement('span');
-            indicatorDot.style.display = 'inline-block';
-            indicatorDot.style.width = '8px';
-            indicatorDot.style.height = '8px';
-            indicatorDot.style.backgroundColor = isError ? '#ff6b6b' : '#4ade80';
-            indicatorDot.style.borderRadius = '50%';
-            indicatorDot.style.marginRight = '8px';
-            indicatorDot.style.boxShadow = isError ? '0 0 4px rgba(255, 107, 107, 0.6)' : '0 0 4px rgba(74, 222, 128, 0.6)';
-            
-            // Add message text
-            const messageText = document.createElement('span');
-            messageText.innerHTML = msg.replace(/\n/g, '<br>'); // Use innerHTML to handle newlines
-            messageText.style.fontSize = '14px';
-            messageText.style.fontWeight = '500';
-            messageText.style.lineHeight = '1.4';
-            messageText.style.wordBreak = 'break-word';
-            
-            // Combine dot and text
-            const messageContent = document.createElement('div');
-            messageContent.style.display = 'flex';
-            messageContent.style.alignItems = 'center';
-            messageContent.appendChild(indicatorDot);
-            messageContent.appendChild(messageText);
-            
-            messageContainer.appendChild(messageContent);
-            
-            // Create buttons container
-            const buttonsContainer = document.createElement('div');
-            buttonsContainer.style.display = 'flex';
-            buttonsContainer.style.alignItems = 'center';
-            buttonsContainer.style.marginLeft = '8px';
-            
-            // Info button
-            const infoBtn = document.createElement('button');
-            infoBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-            infoBtn.title = 'Show more information';
-            infoBtn.style.background = 'none';
-            infoBtn.style.border = 'none';
-            infoBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-            infoBtn.style.cursor = 'pointer';
-            infoBtn.style.padding = '2px';
-            infoBtn.style.marginRight = '6px';
-            infoBtn.style.borderRadius = '4px';
-            infoBtn.style.lineHeight = '0';
-            infoBtn.style.transition = 'all 0.2s';
-            
-            // Close button
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '300px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = isError ? '1px solid #fecaca' : '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
+            const badge = document.createElement('span');
+            badge.textContent = isError ? 'NPTEL' : 'NPTEL Ans';
+            badge.style.backgroundColor = isError ? '#fee2e2' : '#e8f2ff';
+            badge.style.color = isError ? '#ef4444' : '#1686ff';
+            badge.style.border = isError ? '1px solid #fecaca' : '1px solid #bfdbfe';
+            badge.style.fontWeight = '700';
+            badge.style.fontSize = '10px';
+            badge.style.padding = '1px 5px';
+            badge.style.borderRadius = '4px';
+            badge.style.flexShrink = '0';
+
+            const text = document.createElement('span');
+            text.textContent = msg;
+            text.style.fontSize = '11px';
+            text.style.fontWeight = '500';
+            text.style.color = isError ? '#b91c1c' : '#374151';
+            text.style.whiteSpace = 'nowrap';
+            text.style.overflow = 'hidden';
+            text.style.textOverflow = 'ellipsis';
+            text.style.maxWidth = '210px';
+
             const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
+            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
             closeBtn.title = 'Close';
             closeBtn.style.background = 'none';
             closeBtn.style.border = 'none';
-            closeBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
+            closeBtn.style.color = '#9ca3af';
             closeBtn.style.cursor = 'pointer';
             closeBtn.style.padding = '2px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
+            closeBtn.style.display = 'flex';
+            closeBtn.style.alignItems = 'center';
+            closeBtn.style.borderRadius = '3px';
+            closeBtn.style.flexShrink = '0';
+            closeBtn.style.marginLeft = 'auto';
 
-            // Detailed info container (initially hidden)
-            const detailedInfoContainer = document.createElement('div');
-            detailedInfoContainer.style.marginTop = '12px';
-            detailedInfoContainer.style.padding = '10px 12px';
-            detailedInfoContainer.style.backgroundColor = isError ? 'rgba(255, 107, 107, 0.1)' : 'rgba(255, 255, 255, 0.1)';
-            detailedInfoContainer.style.borderRadius = '6px';
-            detailedInfoContainer.style.fontSize = '13px';
-            detailedInfoContainer.style.display = 'none';
-            detailedInfoContainer.style.maxHeight = '120px';
-            detailedInfoContainer.style.overflow = 'auto';
-            detailedInfoContainer.style.lineHeight = '1.4';
-            detailedInfoContainer.style.color = isError ? 'rgba(255, 107, 107, 0.9)' : 'rgba(255, 255, 255, 0.9)';
-            detailedInfoContainer.textContent = detailedInfo;
-
-            // Add event listeners
-            let expanded = false;
-            let hideTimeoutId = null;
-            
-            infoBtn.onmouseover = function() {
-                infoBtn.style.color = isError ? '#ff6b6b' : '#ffffff';
-                infoBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            infoBtn.onmouseout = function() {
-                infoBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                infoBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = isError ? '#ff6b6b' : '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = isError ? 'rgba(255, 107, 107, 0.8)' : 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            infoBtn.onclick = function() {
-                expanded = !expanded;
-                detailedInfoContainer.style.display = expanded ? 'block' : 'none';
-                infoBtn.innerHTML = expanded ? 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
-                
-                // Clear the auto-hide timeout when info is expanded
-                if (expanded) {
-                    if (hideTimeoutId) {
-                        clearTimeout(hideTimeoutId);
-                        hideTimeoutId = null;
-                    }
-                } else {
-                    // Restart the auto-hide timer when info is collapsed
-                    hideTimeoutId = setTimeout(() => {
-                        toast.style.opacity = '0';
-                        toast.style.transform = 'translateY(10px) translateX(-50%)';
-                        setTimeout(() => toast.remove(), 300);
-                    }, 5000);
-                }
-            };
-            
-            closeBtn.onclick = function() {
-                // Clear any existing timeout
-                if (hideTimeoutId) {
-                    clearTimeout(hideTimeoutId);
-                    hideTimeoutId = null;
-                }
-                
+            closeBtn.onmouseover = () => { closeBtn.style.color = '#374151'; };
+            closeBtn.onmouseout = () => { closeBtn.style.color = '#9ca3af'; };
+            closeBtn.onclick = () => {
                 toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
+                toast.style.transform = 'translate(-50%, -8px)';
+                setTimeout(() => toast.remove(), 200);
             };
 
-            // Assemble the toast
-            buttonsContainer.appendChild(infoBtn);
-            buttonsContainer.appendChild(closeBtn);
-            headerContainer.appendChild(messageContainer);
-            headerContainer.appendChild(buttonsContainer);
-            
-            toast.appendChild(headerContainer);
-            toast.appendChild(detailedInfoContainer);
-            
+            toast.appendChild(badge);
+            toast.appendChild(text);
+            toast.appendChild(closeBtn);
             document.body.appendChild(toast);
 
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
 
-            // Set initial auto-hide timeout
-            hideTimeoutId = setTimeout(() => {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.style.opacity = '0';
+                    toast.style.transform = 'translate(-50%, -8px)';
+                    setTimeout(() => toast.remove(), 200);
+                }
+            }, 4500);
         },
-        args: [message, isError, opacity, detailedInfo]
+        args: [message, isError, opacity]
     });
 }
-// Show a spinner toast while AI query is being processed
+
+// Show a spinner toast while AI query is being processed (Neo PAT portal theme)
 async function showSpinnerToast(tabId, message = 'Processing your request...') {
     const opacity = await getToastOpacity();
-    
-    // Remove any existing toast first
     await removeExistingToast(tabId);
 
     chrome.scripting.executeScript({
-        target: {
-            tabId: tabId
-        },
+        target: { tabId: tabId },
         func: function(msg, opacity) {
-            // Create toast container
             const toast = document.createElement('div');
             toast.id = 'neopass-spinner-toast';
             toast.style.position = 'fixed';
-            toast.style.bottom = '20px';
+            toast.style.top = '8px';
             toast.style.left = '50%';
-            toast.style.transform = 'translateX(-50%)';
-            toast.style.backgroundColor = 'rgba(15, 15, 20, 0.95)';
-            toast.style.color = '#f8f9fa';
-            toast.style.padding = '14px 16px';
-            toast.style.borderRadius = '8px';
-            toast.style.zIndex = '999999';
+            toast.style.transform = 'translate(-50%, -8px)';
+            toast.style.backgroundColor = '#ffffff';
+            toast.style.color = '#1f2937';
+            toast.style.padding = '4px 10px';
+            toast.style.borderRadius = '6px';
+            toast.style.zIndex = '2147483647';
             toast.style.opacity = opacity;
-            toast.style.transition = 'all 0.3s ease';
-            toast.style.maxWidth = '320px';
-            toast.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-            toast.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)';
-            toast.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-            toast.style.backdropFilter = 'blur(10px)';
-            toast.style.WebkitBackdropFilter = 'blur(10px)';
-            
-            // Create header container
-            const headerContainer = document.createElement('div');
-            headerContainer.style.display = 'flex';
-            headerContainer.style.justifyContent = 'space-between';
-            headerContainer.style.alignItems = 'center';
-            
-            // Create message container with spinner
-            const messageContainer = document.createElement('div');
-            messageContainer.style.display = 'flex';
-            messageContainer.style.alignItems = 'center';
-            messageContainer.style.gap = '10px';
-            messageContainer.style.flexGrow = '1';
-            
-            // Spinner indicator (pulsing dot)
+            toast.style.transition = 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+            toast.style.maxWidth = '260px';
+            toast.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+            toast.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.08)';
+            toast.style.border = '1px solid #e5e7eb';
+            toast.style.display = 'flex';
+            toast.style.alignItems = 'center';
+            toast.style.gap = '6px';
+
             const spinnerDot = document.createElement('span');
             spinnerDot.style.display = 'inline-block';
-            spinnerDot.style.width = '8px';
-            spinnerDot.style.height = '8px';
-            spinnerDot.style.backgroundColor = '#64b5f6';
+            spinnerDot.style.width = '6px';
+            spinnerDot.style.height = '6px';
+            spinnerDot.style.backgroundColor = '#1686ff';
             spinnerDot.style.borderRadius = '50%';
-            spinnerDot.style.boxShadow = '0 0 4px rgba(100, 181, 246, 0.6)';
-            spinnerDot.style.animation = 'pulse 1.5s ease-in-out infinite';
-            
-            // Message text
+            spinnerDot.style.boxShadow = '0 0 4px rgba(22, 134, 255, 0.5)';
+            spinnerDot.style.animation = 'neoPulse 1.2s ease-in-out infinite';
+            spinnerDot.style.flexShrink = '0';
+
             const messageText = document.createElement('span');
             messageText.textContent = msg;
-            messageText.style.fontSize = '14px';
+            messageText.style.fontSize = '11px';
             messageText.style.fontWeight = '500';
-            messageText.style.lineHeight = '1.4';
-            messageText.style.wordBreak = 'break-word';
-            
-            messageContainer.appendChild(spinnerDot);
-            messageContainer.appendChild(messageText);
-            
-            // Close button
-            const closeBtn = document.createElement('button');
-            closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>';
-            closeBtn.title = 'Close';
-            closeBtn.style.background = 'none';
-            closeBtn.style.border = 'none';
-            closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-            closeBtn.style.cursor = 'pointer';
-            closeBtn.style.padding = '2px';
-            closeBtn.style.marginLeft = '8px';
-            closeBtn.style.borderRadius = '4px';
-            closeBtn.style.lineHeight = '0';
-            closeBtn.style.transition = 'all 0.2s';
-            
-            // Add CSS animation keyframes
+            messageText.style.color = '#374151';
+            messageText.style.whiteSpace = 'nowrap';
+            messageText.style.overflow = 'hidden';
+            messageText.style.textOverflow = 'ellipsis';
+            messageText.style.maxWidth = '210px';
+
             const style = document.createElement('style');
             style.textContent = `
-                @keyframes pulse {
-                    0%, 100% { 
-                        opacity: 1;
-                        transform: scale(1);
-                    }
-                    50% { 
-                        opacity: 0.5;
-                        transform: scale(1.2);
-                    }
+                @keyframes neoPulse {
+                    0%, 100% { opacity: 1; transform: scale(1); }
+                    50% { opacity: 0.35; transform: scale(1.3); }
                 }
             `;
             document.head.appendChild(style);
-            
-            // Event listeners
-            closeBtn.onmouseover = function() {
-                closeBtn.style.color = '#ffffff';
-                closeBtn.style.backgroundColor = 'rgba(255, 255, 255, 0.1)';
-            };
-            
-            closeBtn.onmouseout = function() {
-                closeBtn.style.color = 'rgba(255, 255, 255, 0.8)';
-                closeBtn.style.backgroundColor = 'transparent';
-            };
-            
-            closeBtn.onclick = function() {
-                toast.style.opacity = '0';
-                toast.style.transform = 'translateY(10px) translateX(-50%)';
-                setTimeout(() => toast.remove(), 300);
-            };
-            
-            // Assemble and append
-            headerContainer.appendChild(messageContainer);
-            headerContainer.appendChild(closeBtn);
-            toast.appendChild(headerContainer);
-            
+
+            toast.appendChild(spinnerDot);
+            toast.appendChild(messageText);
             document.body.appendChild(toast);
-            
-            // Add entrance animation
-            toast.style.transform = 'translateY(10px) translateX(-50%)';
+
             setTimeout(() => {
-                toast.style.transform = 'translateY(0) translateX(-50%)';
+                toast.style.transform = 'translate(-50%, 0)';
             }, 10);
         },
         args: [message, opacity]

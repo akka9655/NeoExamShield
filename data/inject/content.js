@@ -182,6 +182,19 @@ function findOptionElements() {
     opts = document.querySelectorAll('testtaking-options .t-flex.t-flex-row, .grouped-mcq__options label, [role="radiogroup"] [role="radio"]');
     if (opts && opts.length > 0) return Array.from(opts);
 
+    // Check 5: Look for radio or checkbox inputs in testtaking-options or question container
+    const inputs = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
+    if (inputs && inputs.length > 0) {
+        const optionContainers = [];
+        inputs.forEach(inp => {
+            const parent = inp.closest('[aria-labelledby*="option"], [id*="option"], label, .t-cursor-pointer, .t-flex') || inp.parentElement;
+            if (parent && !optionContainers.includes(parent)) {
+                optionContainers.push(parent);
+            }
+        });
+        if (optionContainers.length > 0) return optionContainers;
+    }
+
     return [];
 }
 
@@ -328,6 +341,9 @@ async function handleQuestionExtraction() {
     }
 
     let finalQuestion = questionText;
+    if (!finalQuestion && allImages.length > 0) {
+        finalQuestion = "Analyze the provided question diagram/image carefully and select the correct option.";
+    }
     if (visualGuide.length > 0) {
         finalQuestion += `\n\n[Visual Attachments: ${visualGuide.join(', ')}]`;
     }
@@ -976,9 +992,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 
                 // Always show toast with answer confirmation so user gets instant visual feedback
-                const toastMsg = (optionIndex !== null && optionIndex >= 0)
-                    ? `Option ${optionIndex + 1}\n${request.response}`
-                    : request.response;
+                let cleanResponse = (request.response || '').trim();
+                let toastMsg = cleanResponse;
+                if (optionIndex !== null && optionIndex >= 0) {
+                    if (!cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
+                        !cleanResponse.toLowerCase().startsWith('option')) {
+                        toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
+                    }
+                }
 
                 chrome.runtime.sendMessage({
                     action: 'showMCQToast',
