@@ -1995,9 +1995,13 @@ async function getToastOpacity() {
 }
 
 // Show a toast with the current opacity level
-function showOpacityLevelToast(tabId, message) {
+async function showOpacityLevelToast(tabId, message, forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     // Remove any existing toast first
-    removeExistingToast(tabId);
+    await removeExistingToast(tabId);
     
     chrome.scripting.executeScript({
         target: {
@@ -2063,7 +2067,7 @@ function showOpacityLevelToast(tabId, message) {
 async function areToastsEnabled() {
     return new Promise((resolve) => {
         chrome.storage.local.get(['toastsEnabled'], (result) => {
-            resolve(result.toastsEnabled !== false); // default true
+            resolve(result.toastsEnabled === true); // default false (Ghost mode - toasts hidden by default)
         });
     });
 }
@@ -2165,7 +2169,11 @@ async function showToast(tabId, message, isError = false, detailedInfo = '', for
 }
 
 // Show stealth mode toast notification in Neo PAT portal theme
-async function showStealthToast(tabId, message, stealthEnabled) {
+async function showStealthToast(tabId, message, stealthEnabled, forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
@@ -2284,7 +2292,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const enabled = await areToastsEnabled();
             const newState = !enabled;
             await chrome.storage.local.set({ toastsEnabled: newState });
-            showToast(sender.tab.id, newState ? 'Toasts: ON' : 'Toasts: OFF (Silent)', false, '', true);
+            if (!newState) {
+                await removeExistingToast(sender.tab.id);
+            }
+            showToast(sender.tab.id, newState ? 'Toasts: ON (Color Mode)' : 'Toasts: OFF (Ghost Mode)', false, '', true);
             sendResponse({ success: true, enabled: newState });
         })();
         return true;
@@ -2810,7 +2821,11 @@ async function showMCQToast(tabId, message, detailedInfo = '', forceShow = false
 }
 
 // Update showNPTELToast to use Neo PAT portal theme
-async function showNPTELToast(tabId, message, isError = false, detailedInfo = '') {
+async function showNPTELToast(tabId, message, isError = false, detailedInfo = '', forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
