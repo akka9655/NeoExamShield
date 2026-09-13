@@ -589,3 +589,39 @@ function showPopup(resolve, reject, constraints, originalGetDisplayMedia) {
 // Initialize bypasses and observer
 bypassRestrictions();
 spoofScreenRecording();
+
+// In-page MAIN world option selector for Angular Zone.js compatibility
+try {
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.source === 'neo-extension' && event.data.action === 'forceSelectMCQOption') {
+            try {
+                const idx = event.data.optionIndex;
+                if (idx === undefined || idx === null || idx < 0) return;
+
+                let el = document.querySelector('#tt-option-' + idx) ||
+                         document.querySelector('#tt-option-' + (idx + 1));
+                if (!el) {
+                    const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+                    if (all && all.length > idx) el = all[idx];
+                }
+                if (el) {
+                    const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+                    const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
+                    const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
+                    
+                    if (lbl) lbl.click();
+                    if (chk && chk !== lbl) chk.click();
+                    if (inp) {
+                        inp.click();
+                        inp.checked = true;
+                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    if (el !== lbl && el !== chk && el !== inp) {
+                        el.click();
+                    }
+                }
+            } catch (e) {}
+        }
+    });
+} catch (e) {}

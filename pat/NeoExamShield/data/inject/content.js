@@ -288,8 +288,11 @@ function extractQuestionCodeAndOptions() {
     };
 }
 
+// Remember last solved MCQ so Alt+S can immediately select it without re-fetching
+let lastSolvedMCQ = null;
+
 // Function to handle question, code, and options extraction with full image & diagram support
-async function handleQuestionExtraction() {
+async function handleQuestionExtraction(autoClick = false) {
     console.log('[MCQ] Starting question extraction...');
 
     // 1. Extract question text
@@ -368,7 +371,8 @@ async function handleQuestionExtraction() {
         options: optionsText.join('\n'),
         rawOptions: rawOptions,
         images: allImages,
-        isMCQ: true
+        isMCQ: true,
+        autoClick: autoClick
     });
 }
 
@@ -563,6 +567,45 @@ document.addEventListener('keydown', (event) => {
         event.stopPropagation();
         if (isActionThrottled()) return;
         solveIamneoExamly();
+    }
+}, true); // useCapture: true to intercept before portal listeners
+
+// Alt+S (Option+S on macOS): Click the MCQ option itself
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+    const isKeyS = event.code === 'KeyS' || 
+                   (event.key && event.key.toLowerCase() === 's') || 
+                   event.key === 'ß'; // macOS Option+S produces 'ß'
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyS) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
+        if (codingQuestionElement) {
+            chrome.runtime.sendMessage({
+                action: 'showCustomToast',
+                message: 'Alt+S is for MCQ questions. Use Alt+T or Alt+X for coding.'
+            });
+            return;
+        }
+
+        // 1. If this question was already solved (e.g. via Alt+A), click it instantly in 0ms!
+        const currentQEl = findQuestionElement();
+        const currentQText = currentQEl ? htmlToText(currentQEl) : '';
+        if (lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null &&
+            (!currentQText || !lastSolvedMCQ.questionText || lastSolvedMCQ.questionText === currentQText)) {
+            actuallyClickMCQOption(lastSolvedMCQ.optionIndex);
+            chrome.runtime.sendMessage({
+                action: 'showMCQToast',
+                message: `Option ${lastSolvedMCQ.optionIndex + 1} Selected`
+            });
+            return;
+        }
+
+        // 2. Otherwise throttle and solve + click
+        if (isActionThrottled()) return;
+        handleQuestionExtraction(true); // autoClick = true
     }
 }, true); // useCapture: true to intercept before portal listeners
 
@@ -811,6 +854,86 @@ function triggerOptionClick(optionIndex) {
             input.dispatchEvent(new Event('change', { bubbles: true }));
         } catch (e) {}
     }
+
+    return true;
+}
+
+// Deep click selector that firmly clicks and selects the MCQ option on the portal
+function actuallyClickMCQOption(optionIndex) {
+    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
+
+    const optionElements = findOptionElements();
+    let target = null;
+    if (optionElements.length > optionIndex) {
+        target = optionElements[optionIndex];
+    }
+    if (!target) {
+        target = document.querySelector(`#tt-option-${optionIndex}`) ||
+                 document.querySelector(`#tt-option-${optionIndex + 1}`);
+    }
+    if (!target) {
+        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+        if (allOpts && allOpts.length > optionIndex) {
+            target = allOpts[optionIndex];
+        }
+    }
+    if (!target) return false;
+
+    console.log(`[MCQ Selection] Actively clicking option index ${optionIndex} (Option ${optionIndex + 1})`);
+
+    const input = target.querySelector('input[type="radio"], input[type="checkbox"]');
+    const label = target.querySelector('label') || (target.tagName && target.tagName.toLowerCase() === 'label' ? target : null);
+    const checkmark = target.querySelector('span.checkmark1, .checkmark-custom, .checkmark, .p-radiobutton-box');
+
+    const dispatchClick = (elem) => {
+        if (!elem) return;
+        const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
+        events.forEach(type => {
+            try {
+                elem.dispatchEvent(new MouseEvent(type, {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window
+                }));
+            } catch (e) {}
+        });
+        try { elem.click(); } catch (e) {}
+    };
+
+    // 1. Click label first (standard Angular/HTML radio toggler)
+    if (label) dispatchClick(label);
+
+    // 2. Click checkmark span
+    if (checkmark && checkmark !== label) dispatchClick(checkmark);
+
+    // 3. Click input and toggle checked state with input/change events
+    if (input) {
+        try {
+            input.checked = true;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+        dispatchClick(input);
+        try {
+            input.checked = true;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch (e) {}
+    }
+
+    // 4. Click outer target container
+    if (target !== label && target !== checkmark && target !== input) {
+        dispatchClick(target);
+    }
+
+    // 5. Post message to MAIN world execution context for Angular Zone.js trigger
+    try {
+        window.postMessage({
+            source: 'neo-extension',
+            action: 'forceSelectMCQOption',
+            optionIndex: optionIndex
+        }, '*');
+    } catch (e) {}
 
     return true;
 }
@@ -1067,27 +1190,47 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 // Examly / Iamneo platform
                 console.log('[MCQ] Received answer for Examly:', request.response);
                 const optionIndex = parseMCQAnswer(request.response, request.rawOptions);
-                let clicked = false;
+                const qEl = findQuestionElement();
+                const qText = qEl ? htmlToText(qEl) : '';
                 
                 if (optionIndex !== null && optionIndex >= 0) {
-                    clicked = triggerOptionClick(optionIndex);
-                    console.log(`[MCQ] Option click result for index ${optionIndex}: ${clicked}`);
-                }
-                
-                // Always show toast with answer confirmation so user gets instant visual feedback
-                let cleanResponse = (request.response || '').trim();
-                let toastMsg = cleanResponse;
-                if (optionIndex !== null && optionIndex >= 0) {
+                    lastSolvedMCQ = {
+                        questionText: qText,
+                        optionIndex: optionIndex,
+                        response: request.response,
+                        rawOptions: request.rawOptions
+                    };
+
+                    let cleanResponse = (request.response || '').trim();
+                    let toastMsg = cleanResponse;
                     if (!cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
                         !cleanResponse.toLowerCase().startsWith('option')) {
                         toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
                     }
-                }
 
-                chrome.runtime.sendMessage({
-                    action: 'showMCQToast',
-                    message: toastMsg
-                });
+                    if (request.autoClick) {
+                        // Alt+S mode: physically click and select the MCQ option itself
+                        actuallyClickMCQOption(optionIndex);
+                        console.log(`[MCQ] Auto-clicked option index ${optionIndex}`);
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: `Option ${optionIndex + 1} Selected`
+                        });
+                    } else {
+                        // Alt+A mode: show option with circle like (highlight)
+                        triggerOptionClick(optionIndex);
+                        console.log(`[MCQ] Indicated option index ${optionIndex} with circle`);
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: toastMsg
+                        });
+                    }
+                } else {
+                    chrome.runtime.sendMessage({
+                        action: 'showMCQToast',
+                        message: request.response || 'No matching option found'
+                    });
+                }
             }
         } catch (error) {
             chrome.runtime.sendMessage({
