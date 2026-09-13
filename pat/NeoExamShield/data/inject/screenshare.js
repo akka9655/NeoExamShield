@@ -30,8 +30,8 @@ try {
 // Event handler to prevent default tracking behavior safely
 const eventHandler = (event) => {
     try {
-        // Never prevent focus/blur on actual form inputs, buttons, or code editor
-        if (event.type === 'blur' || event.type === 'focus') {
+        // Never prevent focus/blur on actual form inputs, buttons, or code editor, nor pagehide
+        if (event.type === 'blur' || event.type === 'focus' || event.type === 'pagehide') {
             if (event.target !== window && event.target !== document) {
                 return;
             }
@@ -45,21 +45,11 @@ const eventHandler = (event) => {
 
 // Main function to bypass browser restrictions
 function bypassRestrictions() {
-    // Aggressively block beforeunload popup safely
-    const blockBeforeUnload = (e) => {
-        try {
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-            delete e['returnValue'];
-            e.returnValue = undefined;
-        } catch (err) {}
-    };
-    
-    // Add our handler with highest priority (capture phase)
-    try {
-        window.addEventListener('beforeunload', blockBeforeUnload, true);
-    } catch (e) {}
+    // Note: We intentionally do NOT add any beforeunload listener here.
+    // In Chromium/modern browsers, calling preventDefault() or setting returnValue on beforeunload
+    // is what triggers the "Leave site? Changes you made may not be saved." prompt.
+    // By dropping beforeunload in safeAddEventListener below and neutralizing window.onbeforeunload,
+    // we ensure the browser never prompts the user when navigating or closing tabs.
     
     // Override addEventListener to block beforeunload and unload handlers safely
     try {
@@ -149,6 +139,23 @@ function bypassRestrictions() {
             configurable: true,
             enumerable: true
         });
+    } catch (e) {}
+
+    try {
+        if (typeof HTMLBodyElement !== 'undefined' && HTMLBodyElement.prototype) {
+            Object.defineProperty(HTMLBodyElement.prototype, 'onbeforeunload', {
+                get: function() { return null; },
+                set: function(val) {},
+                configurable: true,
+                enumerable: true
+            });
+            Object.defineProperty(HTMLBodyElement.prototype, 'onunload', {
+                get: function() { return null; },
+                set: function(val) {},
+                configurable: true,
+                enumerable: true
+            });
+        }
     } catch (e) {}
     
     // Prevent tracking window events from firing
