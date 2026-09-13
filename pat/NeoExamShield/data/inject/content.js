@@ -569,8 +569,11 @@ function solveIamneoExamly(){
 // Alt+A (Option+A on macOS): Solve MCQ or Coding question
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyA = event.code === 'KeyA' || 
+                   (event.key && event.key.toLowerCase() === 'a') || 
+                   event.key === 'å' || event.key === 'Å';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyA' || (event.key && event.key.toLowerCase() === 'a'))) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyA) {
         event.preventDefault();
         event.stopPropagation();
         if (isActionThrottled()) return;
