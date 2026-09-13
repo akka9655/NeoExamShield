@@ -549,6 +549,14 @@ function isActionThrottled() {
 }
 
 function solveIamneoExamly(){
+    // Check if on HackerRank
+    const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
+                             document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+    if (isHackerRankSite) {
+        handleHackerRankMCQ();
+        return;
+    }
+
     // Check if this is a coding question or MCQ
     const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
     if (codingQuestionElement) {
@@ -1818,13 +1826,18 @@ ${codingData.starterCode}
     }
 }
 
-// Add event listener for Alt+K (Option+K on macOS).
+// Alt+K (Option+K on macOS): Solve HackerRank question (MCQ or Coding)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
-    
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && event.code === 'KeyK') {
+    const isKeyK = event.code === 'KeyK' || 
+                   (event.key && event.key.toLowerCase() === 'k') || 
+                   event.key === '˚' || event.key === '';
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyK) {
         event.preventDefault();
+        event.stopPropagation();
+        if (isActionThrottled()) return;
         handleHackerRankMCQ();
     }
-});
+}, true); // useCapture: true to intercept before Monaco/HackerRank portal listeners
 
