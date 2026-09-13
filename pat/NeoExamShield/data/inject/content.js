@@ -866,9 +866,34 @@ function triggerOptionClick(optionIndex) {
     return true;
 }
 
-// Deep click selector that firmly clicks and selects the MCQ option on the portal
-function actuallyClickMCQOption(optionIndex) {
-    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
+// Remove any previous blue circle highlights across the page
+function clearMCQHighlights() {
+    try {
+        document.querySelectorAll('.neo-blue-circle-highlight').forEach(el => {
+            el.classList.remove('neo-blue-circle-highlight');
+            el.style.removeProperty('box-shadow');
+            el.style.removeProperty('border');
+            el.style.removeProperty('border-radius');
+            el.style.removeProperty('background');
+            el.style.removeProperty('transition');
+        });
+        document.querySelectorAll('.neo-blue-circle-badge').forEach(el => el.remove());
+        document.querySelectorAll('.neo-blue-option-card').forEach(el => {
+            el.classList.remove('neo-blue-option-card');
+            el.style.removeProperty('outline');
+            el.style.removeProperty('outline-offset');
+            el.style.removeProperty('border-radius');
+            el.style.removeProperty('background-color');
+            el.style.removeProperty('transition');
+        });
+    } catch (e) {}
+}
+
+// Highlights the target MCQ option with an unmistakable blue circle indicator
+function highlightMCQOption(optionIndex) {
+    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return null;
+
+    clearMCQHighlights();
 
     const optionElements = findOptionElements();
     let target = null;
@@ -883,6 +908,80 @@ function actuallyClickMCQOption(optionIndex) {
         const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
         if (allOpts && allOpts.length > optionIndex) {
             target = allOpts[optionIndex];
+        }
+    }
+    if (!target) {
+        const hrRadios = document.querySelectorAll('[role="radio"], [role="checkbox"]');
+        if (hrRadios && hrRadios.length > optionIndex) {
+            target = hrRadios[optionIndex].closest('.QuestionDetails_container__AIu0X, .ui-checklist-item, label') || hrRadios[optionIndex];
+        }
+    }
+    if (!target) return null;
+
+    console.log(`[MCQ Highlight] Highlighting option ${optionIndex + 1} with blue circle`);
+
+    // 1. Locate circle element (radio / checkmark / span)
+    const circleElem = target.querySelector('span.checkmark1, .checkmark-custom, .checkmark, .p-radiobutton-box, [role="radio"], input[type="radio"]');
+
+    if (circleElem) {
+        circleElem.classList.add('neo-blue-circle-highlight');
+        circleElem.style.setProperty('box-shadow', '0 0 0 3.5px #2563eb, 0 0 14px rgba(37, 99, 235, 0.75)', 'important');
+        circleElem.style.setProperty('border', '2.5px solid #2563eb', 'important');
+        circleElem.style.setProperty('border-radius', '50%', 'important');
+        circleElem.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
+        if (circleElem.tagName && circleElem.tagName.toLowerCase() !== 'input') {
+            circleElem.style.setProperty('background', 'radial-gradient(circle, #2563eb 55%, rgba(37, 99, 235, 0.2) 60%)', 'important');
+        }
+    } else {
+        // Create an explicit circular blue badge indicator right in front of the option text
+        const badge = document.createElement('span');
+        badge.className = 'neo-blue-circle-badge';
+        badge.style.cssText = 'display: inline-block !important; width: 20px !important; height: 20px !important; border-radius: 50% !important; border: 2.5px solid #2563eb !important; background: radial-gradient(circle, #2563eb 55%, transparent 60%) !important; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35), 0 0 12px rgba(37, 99, 235, 0.7) !important; margin-right: 10px !important; vertical-align: middle !important; flex-shrink: 0 !important;';
+        target.prepend(badge);
+    }
+
+    // 2. Highlight option card container with subtle blue outline & light tint
+    target.classList.add('neo-blue-option-card');
+    target.style.setProperty('outline', '2px solid #2563eb', 'important');
+    target.style.setProperty('outline-offset', '2px', 'important');
+    target.style.setProperty('border-radius', '8px', 'important');
+    target.style.setProperty('background-color', 'rgba(37, 99, 235, 0.08)', 'important');
+    target.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
+
+    // 3. Scroll into view smoothly
+    try {
+        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (e) {}
+
+    return target;
+}
+
+// Deep click selector that firmly clicks and selects the MCQ option on the portal
+function actuallyClickMCQOption(optionIndex) {
+    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
+
+    // Ensure blue circle highlight is active and visible
+    highlightMCQOption(optionIndex);
+
+    const optionElements = findOptionElements();
+    let target = null;
+    if (optionElements.length > optionIndex) {
+        target = optionElements[optionIndex];
+    }
+    if (!target) {
+        target = document.querySelector(`#tt-option-${optionIndex}`) ||
+                 document.querySelector(`#tt-option-${optionIndex + 1}`);
+    }
+    if (!target) {
+        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+        if (allOpts && allOpts.length > optionIndex) {
+            target = allOpts[optionIndex];
+        }
+    }
+    if (!target) {
+        const hrRadios = document.querySelectorAll('[role="radio"], [role="checkbox"]');
+        if (hrRadios && hrRadios.length > optionIndex) {
+            target = hrRadios[optionIndex];
         }
     }
     if (!target) return false;
@@ -929,12 +1028,18 @@ function actuallyClickMCQOption(optionIndex) {
         } catch (e) {}
     }
 
-    // 4. Click outer target container
-    if (target !== label && target !== checkmark && target !== input) {
+    // 4. Also handle HackerRank radio role
+    const hrRadio = (target.getAttribute && (target.getAttribute('role') === 'radio' || target.getAttribute('role') === 'checkbox')) ? target : target.querySelector('[role="radio"], [role="checkbox"]');
+    if (hrRadio && hrRadio !== label && hrRadio !== checkmark && hrRadio !== input) {
+        dispatchClick(hrRadio);
+    }
+
+    // 5. Click outer target container
+    if (target !== label && target !== checkmark && target !== input && target !== hrRadio) {
         dispatchClick(target);
     }
 
-    // 5. Post message to MAIN world execution context for Angular Zone.js trigger
+    // 6. Post message to MAIN world execution context for Angular Zone.js trigger
     try {
         window.postMessage({
             source: 'neo-extension',
@@ -1139,14 +1244,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                                       radio.getAttribute('data-state') === 'checked' ||
                                                       radio.checked === true;
                             
-                            if (!isCurrentlySelected) {
-                                radio.click();
-                                console.log(`HackerRank new layout radio option ${optionNumber + 1} clicked successfully`);
-                                clicked = true;
-                            } else {
-                                console.log(`HackerRank new layout radio option ${optionNumber + 1} already selected`);
-                                clicked = true;
+                            highlightMCQOption(optionNumber);
+                            if (request.autoClick) {
+                                if (!isCurrentlySelected) {
+                                    radio.click();
+                                    console.log(`HackerRank new layout radio option ${optionNumber + 1} clicked successfully`);
+                                }
                             }
+                            clicked = true;
                         } else {
                             // Try checkboxes if no radio buttons found (fallback for single checkbox)
                             const newLayoutCheckboxes = document.querySelectorAll('[role="checkbox"]');
@@ -1157,14 +1262,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                                          checkbox.getAttribute('data-state') === 'checked' ||
                                                          checkbox.checked === true;
                                 
-                                if (!isCurrentlyChecked) {
-                                    checkbox.click();
-                                    console.log(`HackerRank new layout checkbox option ${optionNumber + 1} clicked successfully`);
-                                    clicked = true;
-                                } else {
-                                    console.log(`HackerRank new layout checkbox option ${optionNumber + 1} already selected`);
-                                    clicked = true;
+                                highlightMCQOption(optionNumber);
+                                if (request.autoClick) {
+                                    if (!isCurrentlyChecked) {
+                                        checkbox.click();
+                                        console.log(`HackerRank new layout checkbox option ${optionNumber + 1} clicked successfully`);
+                                    }
                                 }
+                                clicked = true;
                             } else {
                                 // Fallback to old layout (radio buttons)
                                 const questionContainer = document.querySelector('.grouped-mcq__question');
@@ -1173,14 +1278,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                     if (radios.length > optionNumber && optionNumber >= 0) {
                                         const radio = radios[optionNumber];
                                         
-                                        if (!radio.checked) {
-                                            radio.click();
-                                            console.log(`HackerRank old layout option ${optionNumber + 1} clicked successfully`);
-                                            clicked = true;
-                                        } else {
-                                            console.log(`HackerRank old layout option ${optionNumber + 1} already selected`);
-                                            clicked = true;
+                                        highlightMCQOption(optionNumber);
+                                        if (request.autoClick) {
+                                            if (!radio.checked) {
+                                                radio.click();
+                                                console.log(`HackerRank old layout option ${optionNumber + 1} clicked successfully`);
+                                            }
                                         }
+                                        clicked = true;
                                     }
                                 }
                             }
@@ -1225,9 +1330,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             message: `Option ${optionIndex + 1} Selected`
                         });
                     } else {
-                        // Alt+A mode: show option with circle like (highlight)
+                        // Alt+A mode: show option with blue circle like highlight
+                        highlightMCQOption(optionIndex);
                         triggerOptionClick(optionIndex);
-                        console.log(`[MCQ] Indicated option index ${optionIndex} with circle`);
+                        console.log(`[MCQ] Indicated option index ${optionIndex} with blue circle`);
                         chrome.runtime.sendMessage({
                             action: 'showMCQToast',
                             message: toastMsg
