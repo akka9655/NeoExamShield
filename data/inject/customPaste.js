@@ -1,3 +1,10 @@
+// Production stealth: silence all console logs and errors from extension safely
+try {
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+} catch (e) {}
+
 async function performPasteByTyping() {
     console.log('[PasteByTyping] Function called');
     
