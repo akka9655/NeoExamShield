@@ -326,6 +326,7 @@ function checkAndHandleQuestionChange() {
         lastSolvedMCQ = null;
         isMCQSolving = false;
         pendingMCQAutoClick = false;
+        removeMCQDot();
     } else if (newSig && !currentActiveQuestionSignature) {
         currentActiveQuestionSignature = newSig;
     }
@@ -643,7 +644,7 @@ function solveIamneoExamly(){
     if (isCodingQuestionPage()) {
         extractCodingQuestion(false);
     } else {
-        handleQuestionExtraction(false); // Alt+A: solve & highlight with blue circle
+        handleQuestionExtraction(false); // Alt+A: solve & show small dot indicator
     }
 }
 
@@ -902,32 +903,18 @@ function parseMCQAnswer(response, rawOptionTexts = []) {
     return null;
 }
 
-let currentHighlightedOption = null;
-let currentHighlightedCheckmark = null;
+// Discreet small blue dot indicator for MCQ options (Alt+A)
+function removeMCQDot() {
+    try {
+        const dots = document.querySelectorAll('#neo-mcq-dot');
+        dots.forEach(dot => dot.remove());
+    } catch (e) {}
+}
 
-// Function to highlight the selected MCQ option with a clean blue circle highlight
-function highlightMCQOption(optionIndex) {
+function showMCQSmallDot(optionIndex, shouldClear = true) {
     if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return null;
-
-    // Clean up previous highlights
-    if (currentHighlightedOption) {
-        try {
-            currentHighlightedOption.style.removeProperty('outline');
-            currentHighlightedOption.style.removeProperty('outline-offset');
-            currentHighlightedOption.style.removeProperty('box-shadow');
-            currentHighlightedOption.style.removeProperty('border-radius');
-            currentHighlightedOption.style.removeProperty('background-color');
-            currentHighlightedOption.style.removeProperty('transition');
-        } catch (e) {}
-    }
-    if (currentHighlightedCheckmark) {
-        try {
-            currentHighlightedCheckmark.style.removeProperty('outline');
-            currentHighlightedCheckmark.style.removeProperty('outline-offset');
-            currentHighlightedCheckmark.style.removeProperty('box-shadow');
-            currentHighlightedCheckmark.style.removeProperty('border-radius');
-            currentHighlightedCheckmark.style.removeProperty('transition');
-        } catch (e) {}
+    if (shouldClear) {
+        removeMCQDot();
     }
 
     // Locate target option container
@@ -951,37 +938,56 @@ function highlightMCQOption(optionIndex) {
     if (!target) return null;
 
     // Locate the radio checkmark / bullet inside target
-    let checkmarkEl = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]');
+    let checkmarkEl = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
     if (!checkmarkEl) {
         checkmarkEl = document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
                       document.querySelector(`#tt-option-${optionIndex + 1} span.checkmark1`);
     }
-
-    // Apply glowing blue circle highlight to the checkmark/radio circle
-    if (checkmarkEl) {
-        try {
-            checkmarkEl.style.setProperty('outline', '3px solid #2563eb', 'important');
-            checkmarkEl.style.setProperty('outline-offset', '2px', 'important');
-            checkmarkEl.style.setProperty('box-shadow', '0 0 12px rgba(37, 99, 235, 0.7), inset 0 0 6px rgba(37, 99, 235, 0.4)', 'important');
-            checkmarkEl.style.setProperty('border-radius', '50%', 'important');
-            checkmarkEl.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
-            currentHighlightedCheckmark = checkmarkEl;
-        } catch (e) {}
+    if (!checkmarkEl) {
+        checkmarkEl = target.querySelector('[role="radio"], [role="checkbox"]');
     }
 
-    // Apply clean blue highlight to option container
+    // Create the tiny small blue dot element (discreet 6px circle)
+    const dot = document.createElement('span');
+    dot.id = 'neo-mcq-dot';
+    dot.style.cssText = 'display: inline-block !important; width: 6px !important; height: 6px !important; min-width: 6px !important; min-height: 6px !important; max-width: 6px !important; max-height: 6px !important; background-color: #2563eb !important; border-radius: 50% !important; pointer-events: none !important; position: absolute !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; z-index: 99999 !important; box-shadow: 0 0 2px rgba(37, 99, 235, 0.7) !important;';
+
+    let anchor = checkmarkEl;
+    if (anchor && anchor.tagName && anchor.tagName.toLowerCase() !== 'input') {
+        try {
+            const computedPos = window.getComputedStyle(anchor).position;
+            if (computedPos === 'static') {
+                anchor.style.setProperty('position', 'relative', 'important');
+            }
+            anchor.appendChild(dot);
+        } catch (e) {
+            try { target.appendChild(dot); } catch (err) {}
+        }
+    } else {
+        const labelOrTarget = target.querySelector('label') || target;
+        try {
+            const computedPos = window.getComputedStyle(labelOrTarget).position;
+            if (computedPos === 'static') {
+                labelOrTarget.style.setProperty('position', 'relative', 'important');
+            }
+            dot.style.left = '12px';
+            dot.style.transform = 'translateY(-50%)';
+            labelOrTarget.appendChild(dot);
+        } catch (e) {
+            try { target.appendChild(dot); } catch (err) {}
+        }
+    }
+
     try {
-        target.style.setProperty('outline', '2px solid #3b82f6', 'important');
-        target.style.setProperty('outline-offset', '2px', 'important');
-        target.style.setProperty('box-shadow', '0 0 0 4px rgba(59, 130, 246, 0.2)', 'important');
-        target.style.setProperty('border-radius', '8px', 'important');
-        target.style.setProperty('background-color', 'rgba(59, 130, 246, 0.08)', 'important');
-        target.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
-        currentHighlightedOption = target;
         target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch (e) {}
 
-    return target;
+    return dot;
+}
+
+// Backward compatibility alias for showMCQSmallDot
+function highlightMCQOption(optionIndex) {
+    return showMCQSmallDot(optionIndex, true);
 }
 
 // Helper to dispatch a complete, realistic human pointer & click sequence
@@ -1009,15 +1015,14 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
 
     console.log(`[MCQ Auto-Select] Auto-selecting option index ${optionIndex}`);
 
-    // Ensure blue circle highlight is active and visible
-    highlightMCQOption(optionIndex);
+    // Remove any previous dot/UI so auto-select has zero extra UI
+    removeMCQDot();
 
     // HackerRank platform handling
     if (isHackerRank) {
         if (isMultipleChoice && Array.isArray(uniqueOptionNumbers)) {
             const checkboxes = document.querySelectorAll('[role="checkbox"]');
             uniqueOptionNumbers.forEach(idx => {
-                highlightMCQOption(idx);
                 if (checkboxes[idx]) {
                     const isCurrentlyChecked = checkboxes[idx].getAttribute('aria-checked') === 'true' || 
                                              checkboxes[idx].getAttribute('data-state') === 'checked' ||
@@ -1174,15 +1179,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         };
 
                         if (shouldClick) {
+                            removeMCQDot();
                             autoSelectMCQOption(uniqueOptionNumbers[0], true, true, uniqueOptionNumbers);
                         } else {
-                            uniqueOptionNumbers.forEach(idx => highlightMCQOption(idx));
+                            removeMCQDot();
+                            uniqueOptionNumbers.forEach(idx => showMCQSmallDot(idx, false));
+                            chrome.runtime.sendMessage({
+                                action: 'showMCQToast',
+                                message: request.response,
+                            });
                         }
-                        
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: request.response,
-                        });
                     } else {
                         // Single choice question
                         const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
@@ -1201,16 +1207,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             };
 
                             if (shouldClick) {
+                                removeMCQDot();
                                 autoSelectMCQOption(optionNumber, true, false);
                             } else {
-                                highlightMCQOption(optionNumber);
+                                showMCQSmallDot(optionNumber);
+                                chrome.runtime.sendMessage({
+                                    action: 'showMCQToast',
+                                    message: request.response,
+                                });
                             }
                         }
-
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: request.response,
-                        });
                     }
                 } else {
                     // Examly / Iamneo platform
@@ -1237,32 +1243,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         };
 
                         if (shouldClick) {
+                            removeMCQDot();
                             autoSelectMCQOption(optionIndex);
-                            console.log(`[MCQ] Auto-selected option index ${optionIndex}`);
+                            console.log(`[MCQ] Auto-selected option index ${optionIndex} (no extra UI)`);
                         } else {
-                            highlightMCQOption(optionIndex);
-                            console.log(`[MCQ] Highlighted option index ${optionIndex} with blue circle`);
+                            showMCQSmallDot(optionIndex);
+                            console.log(`[MCQ] Indicated option index ${optionIndex} with small dot`);
+                            let cleanResponse = (request.response || '').trim();
+                            let toastMsg = cleanResponse;
+                            if (optionIndex !== null && optionIndex >= 0 && 
+                                !cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
+                                !cleanResponse.toLowerCase().startsWith('option')) {
+                                toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
+                            }
+
+                            chrome.runtime.sendMessage({
+                                action: 'showMCQToast',
+                                message: toastMsg || request.response
+                            });
                         }
                     }
-
-                    let cleanResponse = (request.response || '').trim();
-                    let toastMsg = cleanResponse;
-                    if (optionIndex !== null && optionIndex >= 0 && 
-                        !cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
-                        !cleanResponse.toLowerCase().startsWith('option')) {
-                        toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
-                    }
-
-                    chrome.runtime.sendMessage({
-                        action: 'showMCQToast',
-                        message: toastMsg || request.response
-                    });
                 }
             } catch (error) {
-                chrome.runtime.sendMessage({
-                    action: 'showMCQToast',
-                    message: request.response,
-                });
+                if (!shouldClick) {
+                    chrome.runtime.sendMessage({
+                        action: 'showMCQToast',
+                        message: request.response,
+                    });
+                }
             }
         })();
     }

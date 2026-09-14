@@ -701,6 +701,7 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
 
             // MAIN world backup click for rock-solid DOM trigger (only if auto-clicking)
             if (autoClick) {
+                removeExistingToast(tabId);
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
                     func: function(respText) {
@@ -1658,8 +1659,10 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     length: queryText.length
                 });
 
-                // Show spinner toast immediately so the user has visual feedback
-                showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
+                // Show spinner toast immediately so the user has visual feedback (only if not silent auto-click)
+                if (!request.autoClick) {
+                    showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
+                }
 
                 // Send query and handle response
                 const reqImages = request.images || (request.image ? [request.image] : null);
