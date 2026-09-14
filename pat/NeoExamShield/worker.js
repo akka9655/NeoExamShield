@@ -1220,12 +1220,11 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
     const fallbackModels = [
         primary, 
         'gemini-3.6-flash', 
-        'gemini-2.5-flash', 
-        'gemini-2.0-flash', 
-        'gemini-1.5-flash', 
-        'gemini-flash-latest', 
+        'gemini-flash-lite-latest', 
+        'gemini-3.5-flash-lite', 
         'gemini-3.1-flash-lite', 
-        'gemini-flash-lite-latest'
+        'gemini-flash-latest', 
+        'gemini-3.5-flash'
     ];
     const modelsToTry = [...new Set(fallbackModels)];
 
@@ -1247,13 +1246,8 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 150 : 4096
+            maxOutputTokens: isMCQ ? 800 : 4096
         };
-
-        // Disable thinking budget on newer Gemini models (2.0/2.5/3.x) for instant < 500ms responses
-        if (currentModel.includes('3.') || currentModel.includes('2.5') || currentModel.includes('2.0') || currentModel.includes('thinking')) {
-            generationConfig.thinkingConfig = { thinkingBudget: 0 };
-        }
 
         const requestBody = {
             contents: [{ parts: googleParts }],
