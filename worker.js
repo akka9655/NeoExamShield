@@ -1974,10 +1974,13 @@ async function copyToClipboard(text, tabId) {
                     // Fallback for older browsers or insecure contexts
                     const textarea = document.createElement('textarea');
                     textarea.textContent = content;
-                    document.body.appendChild(textarea);
-                    textarea.select();
-                    document.execCommand('copy');
-                    document.body.removeChild(textarea);
+                    const target = document.body || document.documentElement;
+                    if (target) {
+                        target.appendChild(textarea);
+                        textarea.select();
+                        document.execCommand('copy');
+                        target.removeChild(textarea);
+                    }
                 }
             },
             args: [text]
@@ -2006,10 +2009,13 @@ function copyToClipboard(text) {
                         // Fallback for older browsers or insecure contexts
                         const textarea = document.createElement('textarea');
                         textarea.textContent = content;
-                        document.body.appendChild(textarea);
-                        textarea.select();
-                        document.execCommand('copy');
-                        document.body.removeChild(textarea);
+                        const target = document.body || document.documentElement;
+                        if (target) {
+                            target.appendChild(textarea);
+                            textarea.select();
+                            document.execCommand('copy');
+                            target.removeChild(textarea);
+                        }
                     }
                 },
                 args: [text]
@@ -2170,7 +2176,7 @@ async function showOpacityLevelToast(tabId, message, forceShow = false) {
 
             toast.appendChild(dot);
             toast.appendChild(text);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';
@@ -2275,7 +2281,7 @@ async function showToast(tabId, message, isError = false, detailedInfo = '', for
             toast.appendChild(dot);
             toast.appendChild(text);
             toast.appendChild(closeBtn);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';
@@ -2371,7 +2377,7 @@ async function showStealthToast(tabId, message, stealthEnabled, forceShow = fals
             toast.appendChild(dot);
             toast.appendChild(text);
             toast.appendChild(closeBtn);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';
@@ -2930,7 +2936,7 @@ async function showMCQToast(tabId, message, detailedInfo = '', forceShow = false
 
             toast.appendChild(contentContainer);
             toast.appendChild(closeBtn);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';
@@ -3027,7 +3033,7 @@ async function showNPTELToast(tabId, message, isError = false, detailedInfo = ''
             toast.appendChild(badge);
             toast.appendChild(text);
             toast.appendChild(closeBtn);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';
@@ -3105,11 +3111,11 @@ async function showSpinnerToast(tabId, message = 'Processing your request...', f
                     50% { opacity: 0.35; transform: scale(1.3); }
                 }
             `;
-            document.head.appendChild(style);
+            (document.head || document.documentElement)?.appendChild(style);
 
             toast.appendChild(spinnerDot);
             toast.appendChild(messageText);
-            document.body.appendChild(toast);
+            (document.body || document.documentElement)?.appendChild(toast);
 
             setTimeout(() => {
                 toast.style.transform = 'translate(-50%, 0)';

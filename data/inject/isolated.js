@@ -2,12 +2,23 @@
 var port;
 try {
   port = document.getElementById('lwys-ctv-port');
-  port.remove();
+  if (port) {
+    port.remove();
+    port = null;
+  }
 }
-catch (e) {
+catch (e) {}
+if (!port) {
   port = document.createElement('span');
   port.id = 'lwys-ctv-port';
-  document.documentElement.append(port);
+  const target = document.documentElement || document.head || document.body;
+  if (target) {
+    try { target.append(port); } catch(e) {}
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      try { (document.documentElement || document.head || document.body)?.append(port); } catch(e) {}
+    }, { once: true });
+  }
 }
 port.dataset.hidden = document.hidden;
 port.dataset.enabled = true;

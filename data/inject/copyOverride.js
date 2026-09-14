@@ -1,5 +1,10 @@
 (function () {
 	"use strict";
+	try {
+		console.log = () => {};
+		console.warn = () => {};
+		console.error = () => {};
+	} catch (e) {}
 
 	// Create an invisible textarea for our controlled copy operations
 	const invisibleTextarea = document.createElement("textarea");
@@ -14,8 +19,29 @@
 	invisibleTextarea.style.border = "none";
 	invisibleTextarea.style.outline = "none";
 	invisibleTextarea.style.resize = "none";
-	invisibleTextarea.style.overflow = "hidden";
-	document.body.appendChild(invisibleTextarea);
+	function ensureInvisibleTextarea() {
+		if (!document.getElementById("neoexamshield-invisible-copy")) {
+			const target = document.body || document.documentElement;
+			if (target) {
+				try {
+					target.appendChild(invisibleTextarea);
+				} catch (e) {}
+			} else if (document.readyState === "loading") {
+				document.addEventListener("DOMContentLoaded", () => {
+					try {
+						(document.body || document.documentElement)?.appendChild(invisibleTextarea);
+					} catch (e) {}
+				}, { once: true });
+			}
+		}
+		return invisibleTextarea;
+	}
+
+	if (document.readyState === "loading") {
+		document.addEventListener("DOMContentLoaded", ensureInvisibleTextarea, { once: true });
+	} else {
+		ensureInvisibleTextarea();
+	}
 
 	// Store the last copied text in global variables for paste operations
 	window.neoExamShieldClipboard = "";
@@ -75,6 +101,7 @@
 				);
 			}
 
+			ensureInvisibleTextarea();
 			invisibleTextarea.value = selectedText;
 			invisibleTextarea.select();
 			invisibleTextarea.setSelectionRange(0, selectedText.length);

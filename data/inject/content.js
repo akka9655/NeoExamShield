@@ -49,7 +49,7 @@ window.isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
         
         // Only add if not already present
         if (!document.getElementById('force-text-selection-style')) {
-            document.head.appendChild(style);
+            (document.head || document.documentElement)?.appendChild(style);
         }
         
         // Remove specific attributes and classes that disable text selection
@@ -130,11 +130,25 @@ window.isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0 ||
         }
     });
     
-    // Start observing
-    observer.observe(document.body || document.documentElement, {
-        childList: true,
-        subtree: true
-    });
+    // Start observing safely
+    const targetObs = document.body || document.documentElement;
+    if (targetObs) {
+        try {
+            observer.observe(targetObs, {
+                childList: true,
+                subtree: true
+            });
+        } catch (e) {}
+    } else if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            try {
+                observer.observe(document.body || document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+            } catch (e) {}
+        }, { once: true });
+    }
 })();
 
 // Function to convert HTML to readable text with proper formatting

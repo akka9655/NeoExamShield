@@ -28,7 +28,7 @@ if (typeof window.isMac === 'undefined') {
                 script.src = chrome.runtime.getURL('data/lib/showdown.min.js'); // Local path
                 script.onload = resolve;
                 script.onerror = reject;
-                document.head.appendChild(script);
+                (document.head || document.documentElement)?.appendChild(script);
             });
         }
 
@@ -456,7 +456,7 @@ if (typeof window.isMac === 'undefined') {
         const fontLink = document.createElement('link');
         fontLink.href = 'https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap';
         fontLink.rel = 'stylesheet';
-        document.head.appendChild(fontLink);
+        (document.head || document.documentElement)?.appendChild(fontLink);
 
         // Question extraction functions
         function detectPlatform() {
@@ -1610,7 +1610,7 @@ if (typeof window.isMac === 'undefined') {
             overlay.appendChild(inputArea);
             overlay.appendChild(resizeHandle);
             shadowRoot.appendChild(overlay);
-            document.body.appendChild(shadowHost);
+            (document.body || document.documentElement)?.appendChild(shadowHost);
             
             // Store shadow root reference for later access
             shadowHost._shadowRoot = shadowRoot;
@@ -2046,7 +2046,7 @@ if (typeof window.isMac === 'undefined') {
             // Assemble button in shadow DOM
             buttonShadowRoot.appendChild(buttonStyles);
             buttonShadowRoot.appendChild(button);
-            document.body.appendChild(buttonShadowHost);
+            (document.body || document.documentElement)?.appendChild(buttonShadowHost);
 
             // Add hover effects for stealth mode
             button.addEventListener('mouseenter', () => {
@@ -2757,11 +2757,25 @@ if (typeof window.isMac === 'undefined') {
                 hideBlockedElements();
             });
             
-            // Start observing document body for changes
-            observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
+            // Start observing document body for changes safely
+            const targetObs = document.body || document.documentElement;
+            if (targetObs) {
+                try {
+                    observer.observe(targetObs, {
+                        childList: true,
+                        subtree: true
+                    });
+                } catch (e) {}
+            } else if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', () => {
+                    try {
+                        observer.observe(document.body || document.documentElement, {
+                            childList: true,
+                            subtree: true
+                        });
+                    } catch (e) {}
+                }, { once: true });
+            }
             
             // Also try to block any existing elements immediately
             hideBlockedElements();
@@ -2778,7 +2792,7 @@ if (typeof window.isMac === 'undefined') {
             `).join('\n');
             
             styleElement.textContent = cssRules;
-            document.head.appendChild(styleElement);
+            (document.head || document.documentElement || document.body)?.appendChild(styleElement);
         }
 
         // Set up document-level event handlers
@@ -2901,8 +2915,12 @@ if (typeof window.isMac === 'undefined') {
             });
         }
         
-        // Start the initialization
-        init();
+        // Start the initialization safely
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init, { once: true });
+        } else {
+            init();
+        }
 
         // Add global storage change listener for stealth mode updates across tabs
         chrome.storage.onChanged.addListener((changes, namespace) => {

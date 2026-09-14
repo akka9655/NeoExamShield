@@ -84,7 +84,7 @@ function replaceNeoBrowserButton() {
     `;
     if (!document.querySelector('style[data-neobrowser-style]')) {
       beforeStyle.setAttribute('data-neobrowser-style', 'true');
-      document.head.appendChild(beforeStyle);
+      (document.head || document.documentElement)?.appendChild(beforeStyle);
     }
 
     // Insert our button to the left of the existing button
@@ -109,11 +109,28 @@ const buttonObserver = new MutationObserver((mutations) => {
   replaceNeoBrowserButton();
 });
 
-// Start observing for button changes
-buttonObserver.observe(document.body, { 
-  childList: true, 
-  subtree: true 
-});
+// Start observing for button changes safely
+function startButtonObserver() {
+  const target = document.body || document.documentElement;
+  if (target) {
+    try {
+      buttonObserver.observe(target, { 
+        childList: true, 
+        subtree: true 
+      });
+    } catch (e) {}
+  } else if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+      try {
+        buttonObserver.observe(document.body || document.documentElement, { 
+          childList: true, 
+          subtree: true 
+        });
+      } catch (e) {}
+    }, { once: true });
+  }
+}
+startButtonObserver();
 
 // Initial check for Neo Browser button (in case already loaded)
 if (document.readyState === 'loading') {
