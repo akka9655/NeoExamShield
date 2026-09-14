@@ -700,59 +700,6 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 autoClick: shouldAutoClick,
                 mode: shouldAutoClick ? 'autoSelect' : 'reveal'
             });
-
-            // MAIN world backup click for rock-solid DOM trigger (only if auto-clicking)
-            if (shouldAutoClick) {
-                chrome.scripting.executeScript({
-                    target: { tabId: tabId },
-                    func: function(respText) {
-                        try {
-                            const clean = (respText || '').trim();
-                            const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
-                                             clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
-                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
-                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
-                            if (!optMatch) return;
-                            const val = optMatch[1].toUpperCase();
-                            const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
-                            if (idx < 0) return;
-
-                            function triggerHumanClick() {
-                                let el = document.querySelector('#tt-option-' + idx) ||
-                                         document.querySelector('#tt-option-' + (idx + 1));
-                                if (!el) {
-                                    const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-                                    if (all && all.length > idx) el = all[idx];
-                                }
-                                if (el) {
-                                    const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
-                                    const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
-                                    const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
-                                    const target = chk || lbl || inp || el;
-
-                                    const opts = { bubbles: true, cancelable: true, view: window };
-                                    target.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                    target.dispatchEvent(new MouseEvent('mousedown', opts));
-                                    target.dispatchEvent(new PointerEvent('pointerup', opts));
-                                    target.dispatchEvent(new MouseEvent('mouseup', opts));
-                                    target.click();
-
-                                    if (inp && !inp.checked) {
-                                        inp.checked = true;
-                                        inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                        inp.dispatchEvent(new Event('change', { bubbles: true }));
-                                    }
-                                }
-                            }
-                            triggerHumanClick();
-                            setTimeout(triggerHumanClick, 50);
-                            setTimeout(triggerHumanClick, 150);
-                        } catch(e) {}
-                    },
-                    args: [response],
-                    world: 'MAIN'
-                }).catch(() => {});
-            }
         } else {
             // Clean code block markers and any intro/outro markdown to get 100% pure code
             let cleanedCode = response.trim();

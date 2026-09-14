@@ -957,10 +957,22 @@ function parseMCQAnswer(response, rawOptionTexts = []) {
 
     // 5. Match against actual option texts
     if (Array.isArray(rawOptionTexts) && rawOptionTexts.length > 0) {
+        // Exact match first
         for (let i = 0; i < rawOptionTexts.length; i++) {
-            const optText = (rawOptionTexts[i] || '').trim();
-            if (optText.length > 1 && clean.toLowerCase().includes(optText.toLowerCase())) {
+            const optText = (rawOptionTexts[i] || '').trim().toLowerCase();
+            if (optText.length > 0 && clean.toLowerCase() === optText) {
                 return i;
+            }
+        }
+        // Longest match first to avoid prefix collisions
+        const sortedIndices = rawOptionTexts
+            .map((text, index) => ({ text: (text || '').trim().toLowerCase(), index }))
+            .filter(item => item.text.length > 1)
+            .sort((a, b) => b.text.length - a.text.length);
+
+        for (const item of sortedIndices) {
+            if (clean.toLowerCase().includes(item.text)) {
+                return item.index;
             }
         }
     }
@@ -1062,23 +1074,23 @@ function highlightMCQOption(optionIndex) {
     return showMCQSmallDot(optionIndex, true);
 }
 
-// Helper to dispatch a complete, realistic human pointer & click sequence
+// Helper to dispatch a single, realistic human click without duplicate events
 function dispatchHumanClick(el) {
     if (!el) return;
     try {
-        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
-        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
-        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
-        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-    } catch (e) {
-        try {
-            el.dispatchEvent(new Event('click', { bubbles: true, cancelable: true }));
-        } catch (e2) {}
-    }
+        const opts = { bubbles: true, cancelable: true, view: window };
+        el.dispatchEvent(new PointerEvent('pointerdown', opts));
+        el.dispatchEvent(new MouseEvent('mousedown', opts));
+        el.dispatchEvent(new PointerEvent('pointerup', opts));
+        el.dispatchEvent(new MouseEvent('mouseup', opts));
+    } catch (e) {}
     try {
         el.click();
-    } catch (e) {}
+    } catch (e) {
+        try {
+            el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        } catch (e2) {}
+    }
 }
 
 // Deep click selector that firmly clicks and selects the MCQ option on the portal
@@ -1093,7 +1105,7 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
     // HackerRank platform handling
     if (isHackerRank) {
         if (isMultipleChoice && Array.isArray(uniqueOptionNumbers)) {
-            const checkboxes = document.querySelectorAll('[role="checkbox"]');
+            const checkboxes = document.querySelectorAll('[role="checkbox"], input[type="checkbox"]');
             uniqueOptionNumbers.forEach(idx => {
                 if (checkboxes[idx]) {
                     const isCurrentlyChecked = checkboxes[idx].getAttribute('aria-checked') === 'true' || 
@@ -1107,10 +1119,14 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
             return true;
         }
 
-        const hrRadios = document.querySelectorAll('[role="radio"]');
+        const hrRadios = document.querySelectorAll('[role="radio"], input[type="radio"]');
         if (hrRadios && hrRadios.length > optionIndex) {
-            dispatchHumanClick(hrRadios[optionIndex]);
-            try { hrRadios[optionIndex].setAttribute('aria-checked', 'true'); } catch(e) {}
+            const r = hrRadios[optionIndex];
+            const isCurrentlyChecked = r.getAttribute('aria-checked') === 'true' || r.checked === true;
+            if (!isCurrentlyChecked) {
+                dispatchHumanClick(r);
+                try { r.setAttribute('aria-checked', 'true'); } catch(e) {}
+            }
             return true;
         }
         const hrBoxes = document.querySelectorAll('[role="checkbox"]');
@@ -1128,68 +1144,56 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
     }
     if (!target) {
         target = document.querySelector(`#tt-option-${optionIndex}`) ||
-                 document.querySelector(`#tt-option-${optionIndex + 1}`) ||
                  document.querySelector(`div[aria-labelledby="each-option"]:nth-of-type(${optionIndex + 1})`);
     }
 
-    let checkmark = target ? target.querySelector('span.checkmark1, .checkmark, .checkmark-custom') : null;
-    if (!checkmark) {
-        checkmark = document.querySelector(`#tt-option-${optionIndex} > label > span.checkmark1`) ||
-                    document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
-                    document.querySelector(`#tt-option-${optionIndex + 1} > label > span.checkmark1`) ||
-                    document.querySelector(`#tt-option-${optionIndex + 1} span.checkmark1`);
+    // Identify the single best target to click:
+    // On Examly, span.checkmark1 is the custom styled radio/checkbox element inside <label>
+    let clickTarget = null;
+    if (target) {
+        clickTarget = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom') ||
+                      target.querySelector('label') ||
+                      target.querySelector('input[type="radio"], input[type="checkbox"]') ||
+                      target;
+    }
+    if (!clickTarget) {
+        clickTarget = document.querySelector(`#tt-option-${optionIndex} > label > span.checkmark1`) ||
+                      document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
+                      document.querySelector(`#tt-option-${optionIndex} label`) ||
+                      document.querySelector(`#tt-option-${optionIndex}`);
     }
 
-    let label = target ? (target.querySelector('label') || (target.tagName && target.tagName.toLowerCase() === 'label' ? target : null)) : null;
-    if (!label) {
-        label = document.querySelector(`#tt-option-${optionIndex} label`) ||
-                document.querySelector(`#tt-option-${optionIndex + 1} label`);
-    }
-
-    let input = target ? target.querySelector('input[type="radio"], input[type="checkbox"]') : null;
-    if (!input) {
-        input = document.querySelector(`#tt-option-${optionIndex} input`) ||
-                document.querySelector(`#tt-option-${optionIndex + 1} input`);
+    if (!clickTarget) {
+        console.warn(`[MCQ Auto-Select] No element found for option index ${optionIndex}`);
+        return false;
     }
 
     // Scroll into view
     try {
-        const scrollTarget = checkmark || label || input || target;
-        if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        clickTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch(e) {}
 
-    // Trigger clicks on checkmark, label, input, and container to guarantee Angular selection
-    function performDeepClick() {
-        if (checkmark) dispatchHumanClick(checkmark);
-        if (label) dispatchHumanClick(label);
-        if (input) {
-            input.checked = true;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-            dispatchHumanClick(input);
-        }
-        if (target) dispatchHumanClick(target);
+    // Find the associated radio / checkbox input
+    const input = (target ? target.querySelector('input[type="radio"], input[type="checkbox"]') : null) || 
+                  clickTarget.querySelector('input[type="radio"], input[type="checkbox"]') || 
+                  clickTarget.closest('label, [id^="tt-option-"], div[aria-labelledby="each-option"]')?.querySelector('input[type="radio"], input[type="checkbox"]') ||
+                  document.querySelector(`#tt-option-${optionIndex} input`);
 
-        // Ensure input is checked and dispatch Angular change events
-        if (input && !input.checked) {
-            input.checked = true;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-
-        // Post to MAIN world for Angular Zone.js trigger
-        try {
-            window.postMessage({
-                source: 'neo-extension',
-                action: 'forceSelectMCQOption',
-                optionIndex: optionIndex
-            }, '*');
-        } catch (e) {}
+    // If input is ALREADY checked, do not click it again to avoid toggling off or blinking!
+    if (input && input.checked) {
+        console.log(`[MCQ Auto-Select] Option index ${optionIndex} is already checked.`);
+        return true;
     }
 
-    performDeepClick();
-    setTimeout(performDeepClick, 50);
-    setTimeout(performDeepClick, 150);
+    // Dispatch ONE single human click on the click target
+    dispatchHumanClick(clickTarget);
+
+    // If input is not yet checked, check it and dispatch standard events
+    if (input && !input.checked) {
+        input.checked = true;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
 
     return true;
 }
