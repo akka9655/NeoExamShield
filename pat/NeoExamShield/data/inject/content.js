@@ -293,6 +293,7 @@ let lastSolvedMCQ = null;
 let isMCQSolving = false;
 let pendingMCQAutoClick = false;
 let currentActiveQuestionSignature = '';
+let activeMCQMode = 'autoSelect';
 
 // Helper to get a unique signature of the currently visible question
 function getQuestionSignature() {
@@ -627,9 +628,8 @@ function isCodingQuestionPage() {
 }
 
 function solveIamneoExamly(){
-    // Check if on HackerRank
-    const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
-                             document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+    // Check if on HackerRank (strictly via hostname)
+    const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || window.location.hostname.includes('hackerrank');
     if (isHackerRankSite) {
         handleHackerRankMCQ(false);
         return;
@@ -643,7 +643,7 @@ function solveIamneoExamly(){
     }
 }
 
-// Alt+A (Option+A on macOS): Solve MCQ or Coding question
+// Alt+A (Option+A on macOS): Solve MCQ or Coding question (Reveal mode: shows small dot, NEVER clicks)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyA = event.code === 'KeyA' || 
@@ -655,11 +655,12 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (isActionThrottled('alt_a')) return;
+        activeMCQMode = 'reveal';
         solveIamneoExamly();
     }
 }, true); // useCapture: true to intercept before portal listeners
 
-// Alt+S (Option+S on macOS): Auto-select the correct MCQ option like a human
+// Alt+S (Option+S on macOS): Auto-select the correct MCQ option like a human (Auto-select mode: clicks option, NEVER shows dot)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyS = event.code === 'KeyS' || 
@@ -675,6 +676,9 @@ document.addEventListener('keydown', (event) => {
         if (isCodingQuestionPage()) {
             return;
         }
+
+        activeMCQMode = 'autoSelect';
+        removeMCQDot(); // Remove any dot from prior Alt+A immediately
 
         checkAndHandleQuestionChange();
         const currentSig = getQuestionSignature();
@@ -708,8 +712,7 @@ document.addEventListener('keydown', (event) => {
         // If AI hasn't solved this question yet, trigger solve with auto-click enabled
         console.log('[Alt+S] Triggering AI solve and auto-select');
         pendingMCQAutoClick = true;
-        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
-                                 document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || window.location.hostname.includes('hackerrank');
         if (isHackerRankSite) {
             handleHackerRankMCQ(true);
         } else {
@@ -733,8 +736,7 @@ document.addEventListener('keydown', (event) => {
         event.stopPropagation();
         if (isActionThrottled('alt_t')) return;
 
-        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
-                                 document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || window.location.hostname.includes('hackerrank');
         if (isHackerRankSite) {
             handleHackerRankMCQ(false);
             return;
@@ -1119,43 +1121,30 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
         if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch(e) {}
 
-    // Priority 1: Checkmark span (Examly's primary click target)
-    let clicked = false;
+    // Trigger clicks on checkmark, label, input, and container to guarantee Angular selection
     if (checkmark) {
-        try {
-            checkmark.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        } catch(e) {}
-        try {
-            checkmark.click();
-            clicked = true;
-        } catch(e) {}
+        try { checkmark.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
+        try { checkmark.click(); } catch(e) {}
     }
 
-    // Priority 2: Label
-    if (!clicked && label) {
-        try {
-            label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-        } catch(e) {}
-        try {
-            label.click();
-            clicked = true;
-        } catch(e) {}
+    if (label) {
+        try { label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
+        try { label.click(); } catch(e) {}
     }
 
-    // Priority 3: Input
-    if (!clicked && input) {
+    if (input) {
         try {
+            input.checked = true;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             input.click();
-            clicked = true;
         } catch(e) {}
     }
 
-    // Priority 4: Target container
-    if (!clicked && target) {
-        try {
-            target.click();
-            clicked = true;
-        } catch(e) {}
+    if (target) {
+        try { target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
+        try { target.click(); } catch(e) {}
     }
 
     // Ensure input is checked and dispatch Angular change events
@@ -1189,7 +1178,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 isMCQSolving = false;
-                const shouldClick = request.autoClick === true || pendingMCQAutoClick;
+                const isAutoClick = (request.autoClick === true) || (activeMCQMode === 'autoSelect') || pendingMCQAutoClick;
                 pendingMCQAutoClick = false;
 
                 // Check if this is HackerRank
@@ -1240,7 +1229,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             uniqueOptionNumbers: uniqueOptionNumbers
                         };
 
-                        if (shouldClick) {
+                        if (isAutoClick) {
                             removeMCQDot();
                             autoSelectMCQOption(uniqueOptionNumbers[0], true, true, uniqueOptionNumbers);
                         } else {
@@ -1268,7 +1257,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                 isMultipleChoice: false
                             };
 
-                            if (shouldClick) {
+                            if (isAutoClick) {
                                 removeMCQDot();
                                 autoSelectMCQOption(optionNumber, true, false);
                             } else {
@@ -1304,7 +1293,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             isHackerRank: false
                         };
 
-                        if (shouldClick) {
+                        if (isAutoClick) {
                             removeMCQDot();
                             autoSelectMCQOption(optionIndex);
                             console.log(`[MCQ] Auto-selected option index ${optionIndex} (no extra UI)`);
@@ -1325,16 +1314,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             });
                         }
                     } else {
-                        // Fallback: If optionIndex could not be resolved, show toast so user sees the answer
-                        console.warn('[MCQ] Could not resolve option index from AI response:', request.response);
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: request.response
-                        });
+                        // If optionIndex could not be resolved, show toast ONLY if in Alt+A mode
+                        if (!isAutoClick) {
+                            console.warn('[MCQ] Could not resolve option index from AI response:', request.response);
+                            chrome.runtime.sendMessage({
+                                action: 'showMCQToast',
+                                message: request.response
+                            });
+                        }
                     }
                 }
             } catch (error) {
-                if (!shouldClick) {
+                if (!isAutoClick) {
                     chrome.runtime.sendMessage({
                         action: 'showMCQToast',
                         message: request.response,

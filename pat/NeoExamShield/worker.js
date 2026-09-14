@@ -2201,11 +2201,11 @@ async function showOpacityLevelToast(tabId, message, forceShow = false) {
     });
 }
 
-// Helper to check if toasts are globally enabled (toggled via Alt+Z)
+// Helper to check if toasts are globally enabled (toggled via Alt+Z, default OFF)
 async function areToastsEnabled() {
     return new Promise((resolve) => {
         chrome.storage.local.get(['toastsEnabled'], (result) => {
-            resolve(result.toastsEnabled !== false); // default true for immediate visual feedback
+            resolve(result.toastsEnabled === true); // default false (toasts OFF by default)
         });
     });
 }
@@ -2446,11 +2446,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// Initialize opacity level from storage on startup
+// Initialize toast settings from storage on startup
 chrome.runtime.onStartup.addListener(() => {
-    chrome.storage.local.get(['toastOpacityLevel'], (result) => {
+    chrome.storage.local.get(['toastOpacityLevel', 'toastsEnabled'], (result) => {
         if (result.toastOpacityLevel) {
             currentOpacityLevel = result.toastOpacityLevel;
+        }
+        if (result.toastsEnabled === undefined) {
+            chrome.storage.local.set({ toastsEnabled: false });
         }
     });
 });
