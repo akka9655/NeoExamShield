@@ -686,7 +686,7 @@ function stripCodeComments(code) {
     return finalLines.join('\n').trim();
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = false) {
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true) {
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
         if (isMCQ) {
@@ -696,53 +696,51 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 rawOptions: rawOptions,
                 isHackerRank: isHackerRank,
                 isMultipleChoice: isMultipleChoice,
-                autoClick: autoClick
+                autoClick: Boolean(autoClick)
             });
 
-            // MAIN world backup click for rock-solid DOM trigger
-            chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                func: function(respText, autoClickMode) {
-                    try {
-                        const clean = (respText || '').trim();
-                        const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
-                                         clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
-                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
-                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
-                        if (!optMatch) return;
-                        const val = optMatch[1].toUpperCase();
-                        const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
-                        if (idx < 0) return;
+            // MAIN world backup click for rock-solid DOM trigger (only if auto-clicking)
+            if (autoClick) {
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: function(respText) {
+                        try {
+                            const clean = (respText || '').trim();
+                            const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
+                                             clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
+                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
+                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
+                            if (!optMatch) return;
+                            const val = optMatch[1].toUpperCase();
+                            const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+                            if (idx < 0) return;
 
-                        let el = document.querySelector('#tt-option-' + idx) ||
-                                 document.querySelector('#tt-option-' + (idx + 1));
-                        if (!el) {
-                            const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-                            if (all && all.length > idx) el = all[idx];
-                        }
-                        if (el) {
-                            const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
-                            const lbl = el.querySelector('label') || el;
-                            const chk = el.querySelector('span.checkmark1, .checkmark');
-                            if (autoClickMode) {
+                            let el = document.querySelector('#tt-option-' + idx) ||
+                                     document.querySelector('#tt-option-' + (idx + 1));
+                            if (!el) {
+                                const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+                                if (all && all.length > idx) el = all[idx];
+                            }
+                            if (el) {
+                                const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+                                const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
+                                const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
                                 if (lbl) lbl.click();
                                 if (chk && chk !== lbl) chk.click();
                                 if (inp) {
-                                    inp.click();
                                     inp.checked = true;
                                     inp.dispatchEvent(new Event('input', { bubbles: true }));
                                     inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                    inp.click();
                                 }
                                 el.click();
-                            } else {
-                                (chk || el).click();
                             }
-                        }
-                    } catch(e) {}
-                },
-                args: [response, Boolean(autoClick)],
-                world: 'MAIN'
-            }).catch(() => {});
+                        } catch(e) {}
+                    },
+                    args: [response],
+                    world: 'MAIN'
+                }).catch(() => {});
+            }
         } else {
             // Clean code block markers and any intro/outro markdown to get 100% pure code
             let cleanedCode = response.trim();
@@ -775,7 +773,7 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 });
                 showToast(tabId, 'Typing Mode Ready: Type any keys to write code');
             } else {
-                // Alt+T: Fast Instant direct code insertion into Ace editor
+                // Alt+T: Fast Instant direct code insertion into Ace / Monaco / textarea editor
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
                     func: function(code) {
@@ -789,19 +787,40 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                                 ed.setValue(code, 1);
                                 ed.clearSelection();
                                 ed.navigateFileEnd();
+                                return;
                             } catch(e) {}
                         } else if (typeof ace !== 'undefined') {
                             var editors = document.querySelectorAll('.ace_editor');
-                            editors.forEach(function(el) {
+                            for (var i = 0; i < editors.length; i++) {
                                 try {
-                                    var ed = ace.edit(el);
+                                    var ed = ace.edit(editors[i]);
                                     if (!ed.getReadOnly()) {
                                         ed.setValue(code, 1);
                                         ed.clearSelection();
                                         ed.navigateFileEnd();
+                                        return;
                                     }
                                 } catch(e) {}
-                            });
+                            }
+                        }
+                        // Monaco Editor Support
+                        if (window.monaco && window.monaco.editor) {
+                            try {
+                                var models = window.monaco.editor.getModels();
+                                if (models && models.length > 0) {
+                                    models[0].setValue(code);
+                                    return;
+                                }
+                            } catch(e) {}
+                        }
+                        // Standard textarea / input fallback
+                        var txtArea = document.querySelector('textarea.ace_text-input') || document.querySelector('textarea, .input-area');
+                        if (txtArea) {
+                            try {
+                                txtArea.value = code;
+                                txtArea.dispatchEvent(new Event('input', { bubbles: true }));
+                                txtArea.dispatchEvent(new Event('change', { bubbles: true }));
+                            } catch(e) {}
                         }
                     },
                     args: [cleanedCode],
@@ -811,9 +830,6 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 });
                 showToast(tabId, 'Code Solution Inserted');
             }
-
-            // Clean up spinner toast
-            removeExistingToast(tabId);
         }
     } else if (response && response.error) {
         // Error case - response contains error information
@@ -1162,7 +1178,7 @@ async function getCustomAPIConfigs() {
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.5-flash'
+                modelName: 'gemini-3.6-flash'
             })));
         });
     });
@@ -1222,7 +1238,7 @@ async function resolveImageToBase64(imgUrlOrData) {
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
     const defaultModel = 'gemini-3.6-flash';
     const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
-    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite', 'gemini-flash-latest', 'gemini-3.5-flash'];
+    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
@@ -1613,8 +1629,11 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
                             Ensure the code: Meets the requirements outlined in the problem statement.
                             Strictly passes all test cases, including edge cases and boundary conditions.
-                            Always get the input from the users.
-                            CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.` +
+                            Always read the input from standard input as specified.
+                            CRITICAL LANGUAGE RULES:
+                            - If the language is C or C++, include all required headers (<stdio.h>, <stdlib.h>, <string.h>, <math.h>). Ensure format specifiers match variable types precisely. Handle newline/whitespace before strings or characters properly. Always end with return 0;.
+                            - CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.
+                            - Output ONLY the complete executable code inside markdown code fences. Absolutely no text before or after.` +
                             `Question:\n${request.question}\n\n` +
                             (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}\n\n` : '') +
                             (request.constraints ? `Constraints:\n${request.constraints}\n\n` : '') +
@@ -1708,17 +1727,21 @@ async function handleChatMessage(message, sender) {
         
         if (customAPIConfigs.length > 0) {
             let lastResult = null;
+            const chatPrompt = (message.context ? `Context:\n${message.context}\n\n` : '') + (message.message || '');
             for (const config of customAPIConfigs) {
-                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config);
+                const result = await queryCustomAPI(chatPrompt, false, false, config, message.image);
                 if (typeof result === 'string') {
                     unblockRequests();
-                    return result; // Success
+                    sendChatResponse(sender.tab.id, result);
+                    return; // Success
                 }
                 console.warn("API Key failed, falling back to next...", result);
                 lastResult = result;
             }
             unblockRequests();
-            return lastResult; // Return the last error if all failed
+            const errMsg = (lastResult && lastResult.error) ? lastResult.error : "Failed to get AI response. Please check your API key.";
+            sendChatErrorResponse(sender.tab.id, errMsg);
+            return;
         }
         
         // Check if user is logged in
@@ -2169,7 +2192,7 @@ async function showOpacityLevelToast(tabId, message, forceShow = false) {
 async function areToastsEnabled() {
     return new Promise((resolve) => {
         chrome.storage.local.get(['toastsEnabled'], (result) => {
-            resolve(result.toastsEnabled === true); // default false (Ghost mode - toasts hidden by default)
+            resolve(result.toastsEnabled !== false); // default true for immediate visual feedback
         });
     });
 }

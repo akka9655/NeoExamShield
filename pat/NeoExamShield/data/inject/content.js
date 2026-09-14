@@ -288,12 +288,69 @@ function extractQuestionCodeAndOptions() {
     };
 }
 
-// Remember last solved MCQ so Alt+S can immediately select it without re-fetching
+// MCQ state tracking for Alt+A (solve/reveal) and Alt+S (human-like click only)
 let lastSolvedMCQ = null;
+let isMCQSolving = false;
+let pendingMCQAutoClick = false;
+let currentActiveQuestionSignature = '';
+
+// Helper to get a unique signature of the currently visible question
+function getQuestionSignature() {
+    try {
+        const qEl = findQuestionElement();
+        const qText = qEl ? htmlToText(qEl).trim() : '';
+        const optEls = findOptionElements();
+        const optsText = Array.from(optEls).map(el => htmlToText(el).trim()).filter(Boolean).join('|||');
+        
+        let imgSign = '';
+        if (qEl) {
+            const imgs = qEl.querySelectorAll('img');
+            imgSign = Array.from(imgs).map(img => img.src || '').join(',');
+        }
+
+        const qNumEl = document.querySelector('[aria-labelledby*="question-number"], .question-index, .question-number, #question-no, .q-number, .testtaking-header span, .t-text-medium.t-font-medium');
+        const qNum = qNumEl ? qNumEl.innerText.trim() : '';
+
+        if (!qText && !optsText && !imgSign) return '';
+        return `${qNum}:::${qText}:::${optsText}:::${imgSign}`;
+    } catch (e) {
+        return '';
+    }
+}
+
+// Function to handle when question changes to a new one
+function checkAndHandleQuestionChange() {
+    const newSig = getQuestionSignature();
+    if (newSig && currentActiveQuestionSignature && newSig !== currentActiveQuestionSignature) {
+        currentActiveQuestionSignature = newSig;
+        lastSolvedMCQ = null;
+        isMCQSolving = false;
+        pendingMCQAutoClick = false;
+    } else if (newSig && !currentActiveQuestionSignature) {
+        currentActiveQuestionSignature = newSig;
+    }
+}
+
+// Check for question change periodically and on navigation clicks
+setInterval(checkAndHandleQuestionChange, 400);
+
+document.addEventListener('click', (e) => {
+    const navClick = e.target.closest('button, [tooltip], .back-btn, [id*="question"], [id*="section"], [aria-labelledby*="question"], [aria-labelledby*="section"], .t-cursor-pointer, .t-rounded-full');
+    if (navClick) {
+        checkAndHandleQuestionChange();
+        setTimeout(checkAndHandleQuestionChange, 50);
+        setTimeout(checkAndHandleQuestionChange, 150);
+        setTimeout(checkAndHandleQuestionChange, 300);
+    }
+}, true);
 
 // Function to handle question, code, and options extraction with full image & diagram support
-async function handleQuestionExtraction(autoClick = false) {
-    console.log('[MCQ] Starting question extraction...');
+async function handleQuestionExtraction(autoClick = true) {
+    console.log('[MCQ] Starting question extraction with autoClick =', autoClick);
+    checkAndHandleQuestionChange();
+    currentActiveQuestionSignature = getQuestionSignature();
+    isMCQSolving = true;
+    pendingMCQAutoClick = Boolean(autoClick);
 
     // 1. Extract question text
     const questionElement = findQuestionElement();
@@ -345,6 +402,8 @@ async function handleQuestionExtraction(autoClick = false) {
 
     if (!questionText && optionsText.length === 0 && allImages.length === 0) {
         console.warn('[MCQ] No question or options detected on page.');
+        isMCQSolving = false;
+        pendingMCQAutoClick = false;
         chrome.runtime.sendMessage({
             action: 'showMCQToast',
             message: 'No MCQ detected. Make sure an MCQ question is open.'
@@ -548,21 +607,43 @@ function isActionThrottled() {
     return false;
 }
 
+// Helper to accurately detect if current page is a coding question vs an MCQ
+function isCodingQuestionPage() {
+    // 1. If MCQ options exist on the page, it is definitely NOT a coding question
+    const optionElements = findOptionElements();
+    if (optionElements && optionElements.length > 0) return false;
+    if (document.querySelector('[id^="tt-option-"], div[aria-labelledby="each-option"], [aria-labelledby="each-option-card"], .grouped-mcq__options, [role="radiogroup"], testtaking-options')) {
+        return false;
+    }
+
+    // 2. Explicit coding elements on Examly / Iamneo / HackerRank
+    // Note: Do not include footer submit buttons as they exist on all page footers
+    const codingElement = document.querySelector('div[aria-labelledby="input-format"], programming-question, programming-answer, #programme-compile, app-language-dropdown, div[aria-labelledby="code-constraints"], .hr-monaco-editor');
+    if (codingElement) return true;
+
+    // 3. Ace editor (must be visible/active, not 0-dimension hidden container)
+    const aceEl = document.querySelector('.ace_editor');
+    if (aceEl && (aceEl.offsetWidth > 0 || aceEl.offsetHeight > 0)) {
+        return true;
+    }
+
+    return false;
+}
+
 function solveIamneoExamly(){
     // Check if on HackerRank
     const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
                              document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
     if (isHackerRankSite) {
-        handleHackerRankMCQ();
+        handleHackerRankMCQ(false);
         return;
     }
 
     // Check if this is a coding question or MCQ
-    const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
-    if (codingQuestionElement) {
+    if (isCodingQuestionPage()) {
         extractCodingQuestion(false);
     } else {
-        handleQuestionExtraction();
+        handleQuestionExtraction(false); // Alt+A: solve & highlight with blue circle
     }
 }
 
@@ -581,7 +662,7 @@ document.addEventListener('keydown', (event) => {
     }
 }, true); // useCapture: true to intercept before portal listeners
 
-// Alt+S (Option+S on macOS): Click the MCQ option itself
+// Alt+S (Option+S on macOS): Auto-select the correct MCQ option like a human
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyS = event.code === 'KeyS' || 
@@ -592,33 +673,45 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
         event.stopPropagation();
 
-        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
-        if (codingQuestionElement) {
-            chrome.runtime.sendMessage({
-                action: 'showCustomToast',
-                message: 'Alt+S is for MCQ questions. Use Alt+T or Alt+X for coding.'
-            });
+        if (isCodingQuestionPage()) {
             return;
         }
 
-        // 1. If this question was already solved (e.g. via Alt+A), click it instantly in 0ms!
+        checkAndHandleQuestionChange();
+        const currentSig = getQuestionSignature();
         const currentQEl = findQuestionElement();
-        const currentQText = currentQEl ? htmlToText(currentQEl) : '';
-        if (lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null &&
-            (!currentQText || !lastSolvedMCQ.questionText || lastSolvedMCQ.questionText === currentQText)) {
-            actuallyClickMCQOption(lastSolvedMCQ.optionIndex);
-            chrome.runtime.sendMessage({
-                action: 'showMCQToast',
-                message: `Option ${lastSolvedMCQ.optionIndex + 1} Selected`
-            });
+        const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
+
+        // Check if we have a valid solved answer matching the CURRENT question
+        const isMatch = lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null && (
+            (lastSolvedMCQ.signature && currentSig && lastSolvedMCQ.signature === currentSig) ||
+            (lastSolvedMCQ.questionText && currentQText && lastSolvedMCQ.questionText === currentQText && currentQText.length > 5)
+        );
+
+        if (isMatch) {
+            autoSelectMCQOption(lastSolvedMCQ.optionIndex, lastSolvedMCQ.isHackerRank, lastSolvedMCQ.isMultipleChoice, lastSolvedMCQ.uniqueOptionNumbers);
             return;
         }
 
-        // 2. Otherwise throttle and solve + click
-        if (isActionThrottled()) return;
-        handleQuestionExtraction(true); // autoClick = true
+        // If AI is currently solving this question, queue auto-click so it clicks as soon as AI finishes
+        if (isMCQSolving) {
+            pendingMCQAutoClick = true;
+            return;
+        }
+
+        // If AI hasn't solved this question yet, trigger solve with auto-click enabled
+        pendingMCQAutoClick = true;
+        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
+                                 document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+        if (isHackerRankSite) {
+            handleHackerRankMCQ(true);
+        } else {
+            handleQuestionExtraction(true);
+        }
     }
 }, true); // useCapture: true to intercept before portal listeners
+
+
 
 // Alt+T (Option+T on macOS): Instant code insertion into editor
 document.addEventListener('keydown', (event) => {
@@ -630,8 +723,7 @@ document.addEventListener('keydown', (event) => {
         if (isActionThrottled()) return;
 
         // Only fetch if this is a coding question
-        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
-        if (!codingQuestionElement) return;
+        if (!isCodingQuestionPage()) return;
 
         extractCodingQuestion(false); // Direct instant mode
     }
@@ -646,28 +738,20 @@ document.addEventListener('keydown', (event) => {
         event.stopPropagation();
         if (isActionThrottled()) return;
 
-        const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]') ||
-                                      document.querySelector('[aria-labelledby="editor-answer"]') ||
-                                      document.querySelector('.ace_editor');
-        if (!codingQuestionElement) return;
+        if (!isCodingQuestionPage()) return;
 
         extractCodingQuestion(true); // Random key press typing mode
     }
 }, true); // useCapture: true to intercept before portal listeners
 
-// Alt+C (Option+C on macOS): Stop/Off Random Key Typing Mode
+// Alt+C (Option+C on macOS): Toggle AI Chatbot & Stop Typing Mode
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
 
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyC' || (event.key && event.key.toLowerCase() === 'c'))) {
         event.preventDefault();
-        event.stopPropagation();
-
         window.dispatchEvent(new CustomEvent('neoStopTyping'));
-        chrome.runtime.sendMessage({
-            action: 'showCustomToast',
-            message: 'Typing Mode Stopped'
-        });
+        window.dispatchEvent(new CustomEvent('neoToggleChat'));
     }
 }, true); // useCapture: true to intercept before portal listeners
 
@@ -818,168 +902,44 @@ function parseMCQAnswer(response, rawOptionTexts = []) {
     return null;
 }
 
-// Reliable option click simulator for Angular / Examly
-function triggerOptionClick(optionIndex) {
-    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
-    
-    const optionElements = findOptionElements();
-    let target = null;
-    
-    if (optionElements.length > optionIndex) {
-        target = optionElements[optionIndex];
-    }
-    
-    if (!target) {
-        target = document.querySelector(`#tt-option-${optionIndex}`) || 
-                 document.querySelector(`#tt-option-${optionIndex + 1}`);
-    }
+let currentHighlightedOption = null;
+let currentHighlightedCheckmark = null;
 
-    if (!target) return false;
-
-    console.log(`[MCQ Click] Clicking option index ${optionIndex} (Option ${optionIndex + 1})`);
-
-    const input = target.querySelector('input[type="radio"], input[type="checkbox"]');
-    const checkmark = target.querySelector('span.checkmark1, .checkmark, label');
-    const clickTarget = checkmark || input || target;
-
-    const mouseEvents = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-    mouseEvents.forEach(eventType => {
-        try {
-            clickTarget.dispatchEvent(new MouseEvent(eventType, {
-                bubbles: true,
-                cancelable: true,
-                view: window
-            }));
-        } catch (e) {}
-    });
-
-    try { clickTarget.click(); } catch (e) {}
-    if (clickTarget !== target) {
-        try { target.click(); } catch (e) {}
-    }
-
-    if (input) {
-        try {
-            input.checked = true;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (e) {}
-    }
-
-    return true;
-}
-
-// Remove any previous blue circle highlights across the page
-function clearMCQHighlights() {
-    try {
-        document.querySelectorAll('.neo-blue-circle-highlight').forEach(el => {
-            el.classList.remove('neo-blue-circle-highlight');
-            el.style.removeProperty('box-shadow');
-            el.style.removeProperty('border');
-            el.style.removeProperty('border-radius');
-            el.style.removeProperty('background');
-            el.style.removeProperty('transition');
-        });
-        document.querySelectorAll('.neo-blue-circle-badge').forEach(el => el.remove());
-        document.querySelectorAll('.neo-blue-option-card').forEach(el => {
-            el.classList.remove('neo-blue-option-card');
-            el.style.removeProperty('outline');
-            el.style.removeProperty('outline-offset');
-            el.style.removeProperty('border-radius');
-            el.style.removeProperty('background-color');
-            el.style.removeProperty('transition');
-        });
-    } catch (e) {}
-}
-
-// Highlights the target MCQ option with an unmistakable blue circle indicator
+// Function to highlight the selected MCQ option with a clean blue circle highlight
 function highlightMCQOption(optionIndex) {
     if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return null;
 
-    clearMCQHighlights();
+    // Clean up previous highlights
+    if (currentHighlightedOption) {
+        try {
+            currentHighlightedOption.style.removeProperty('outline');
+            currentHighlightedOption.style.removeProperty('outline-offset');
+            currentHighlightedOption.style.removeProperty('box-shadow');
+            currentHighlightedOption.style.removeProperty('border-radius');
+            currentHighlightedOption.style.removeProperty('background-color');
+            currentHighlightedOption.style.removeProperty('transition');
+        } catch (e) {}
+    }
+    if (currentHighlightedCheckmark) {
+        try {
+            currentHighlightedCheckmark.style.removeProperty('outline');
+            currentHighlightedCheckmark.style.removeProperty('outline-offset');
+            currentHighlightedCheckmark.style.removeProperty('box-shadow');
+            currentHighlightedCheckmark.style.removeProperty('border-radius');
+            currentHighlightedCheckmark.style.removeProperty('transition');
+        } catch (e) {}
+    }
 
+    // Locate target option container
     const optionElements = findOptionElements();
     let target = null;
-    if (optionElements.length > optionIndex) {
+    if (optionElements && optionElements.length > optionIndex) {
         target = optionElements[optionIndex];
     }
     if (!target) {
         target = document.querySelector(`#tt-option-${optionIndex}`) ||
-                 document.querySelector(`#tt-option-${optionIndex + 1}`);
-    }
-    if (!target) {
-        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-        if (allOpts && allOpts.length > optionIndex) {
-            target = allOpts[optionIndex];
-        }
-    }
-    if (!target) {
-        const hrRadios = document.querySelectorAll('[role="radio"], [role="checkbox"]');
-        if (hrRadios && hrRadios.length > optionIndex) {
-            target = hrRadios[optionIndex].closest('.QuestionDetails_container__AIu0X, .ui-checklist-item, label') || hrRadios[optionIndex];
-        }
-    }
-    if (!target) return null;
-
-    console.log(`[MCQ Highlight] Highlighting option ${optionIndex + 1} with blue circle`);
-
-    // 1. Locate circle element (radio / checkmark / span)
-    const circleElem = target.querySelector('span.checkmark1, .checkmark-custom, .checkmark, .p-radiobutton-box, [role="radio"], input[type="radio"]');
-
-    if (circleElem) {
-        circleElem.classList.add('neo-blue-circle-highlight');
-        circleElem.style.setProperty('box-shadow', '0 0 0 3.5px #2563eb, 0 0 14px rgba(37, 99, 235, 0.75)', 'important');
-        circleElem.style.setProperty('border', '2.5px solid #2563eb', 'important');
-        circleElem.style.setProperty('border-radius', '50%', 'important');
-        circleElem.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
-        if (circleElem.tagName && circleElem.tagName.toLowerCase() !== 'input') {
-            circleElem.style.setProperty('background', 'radial-gradient(circle, #2563eb 55%, rgba(37, 99, 235, 0.2) 60%)', 'important');
-        }
-    } else {
-        // Create an explicit circular blue badge indicator right in front of the option text
-        const badge = document.createElement('span');
-        badge.className = 'neo-blue-circle-badge';
-        badge.style.cssText = 'display: inline-block !important; width: 20px !important; height: 20px !important; border-radius: 50% !important; border: 2.5px solid #2563eb !important; background: radial-gradient(circle, #2563eb 55%, transparent 60%) !important; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35), 0 0 12px rgba(37, 99, 235, 0.7) !important; margin-right: 10px !important; vertical-align: middle !important; flex-shrink: 0 !important;';
-        target.prepend(badge);
-    }
-
-    // 2. Highlight option card container with subtle blue outline & light tint
-    target.classList.add('neo-blue-option-card');
-    target.style.setProperty('outline', '2px solid #2563eb', 'important');
-    target.style.setProperty('outline-offset', '2px', 'important');
-    target.style.setProperty('border-radius', '8px', 'important');
-    target.style.setProperty('background-color', 'rgba(37, 99, 235, 0.08)', 'important');
-    target.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
-
-    // 3. Scroll into view smoothly
-    try {
-        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    } catch (e) {}
-
-    return target;
-}
-
-// Deep click selector that firmly clicks and selects the MCQ option on the portal
-function actuallyClickMCQOption(optionIndex) {
-    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
-
-    // Ensure blue circle highlight is active and visible
-    highlightMCQOption(optionIndex);
-
-    const optionElements = findOptionElements();
-    let target = null;
-    if (optionElements.length > optionIndex) {
-        target = optionElements[optionIndex];
-    }
-    if (!target) {
-        target = document.querySelector(`#tt-option-${optionIndex}`) ||
-                 document.querySelector(`#tt-option-${optionIndex + 1}`);
-    }
-    if (!target) {
-        const allOpts = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-        if (allOpts && allOpts.length > optionIndex) {
-            target = allOpts[optionIndex];
-        }
+                 document.querySelector(`#tt-option-${optionIndex + 1}`) ||
+                 document.querySelector(`div[aria-labelledby="each-option"]:nth-of-type(${optionIndex + 1})`);
     }
     if (!target) {
         const hrRadios = document.querySelectorAll('[role="radio"], [role="checkbox"]');
@@ -987,62 +947,160 @@ function actuallyClickMCQOption(optionIndex) {
             target = hrRadios[optionIndex];
         }
     }
-    if (!target) return false;
 
-    console.log(`[MCQ Selection] Actively clicking option index ${optionIndex} (Option ${optionIndex + 1})`);
+    if (!target) return null;
 
-    const input = target.querySelector('input[type="radio"], input[type="checkbox"]');
-    const label = target.querySelector('label') || (target.tagName && target.tagName.toLowerCase() === 'label' ? target : null);
-    const checkmark = target.querySelector('span.checkmark1, .checkmark-custom, .checkmark, .p-radiobutton-box');
+    // Locate the radio checkmark / bullet inside target
+    let checkmarkEl = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom, input[type="radio"], input[type="checkbox"], [role="radio"], [role="checkbox"]');
+    if (!checkmarkEl) {
+        checkmarkEl = document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
+                      document.querySelector(`#tt-option-${optionIndex + 1} span.checkmark1`);
+    }
 
-    const dispatchClick = (elem) => {
-        if (!elem) return;
-        const events = ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'];
-        events.forEach(type => {
-            try {
-                elem.dispatchEvent(new MouseEvent(type, {
-                    bubbles: true,
-                    cancelable: true,
-                    view: window
-                }));
-            } catch (e) {}
-        });
-        try { elem.click(); } catch (e) {}
-    };
+    // Apply glowing blue circle highlight to the checkmark/radio circle
+    if (checkmarkEl) {
+        try {
+            checkmarkEl.style.setProperty('outline', '3px solid #2563eb', 'important');
+            checkmarkEl.style.setProperty('outline-offset', '2px', 'important');
+            checkmarkEl.style.setProperty('box-shadow', '0 0 12px rgba(37, 99, 235, 0.7), inset 0 0 6px rgba(37, 99, 235, 0.4)', 'important');
+            checkmarkEl.style.setProperty('border-radius', '50%', 'important');
+            checkmarkEl.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
+            currentHighlightedCheckmark = checkmarkEl;
+        } catch (e) {}
+    }
 
-    // 1. Click label first (standard Angular/HTML radio toggler)
-    if (label) dispatchClick(label);
+    // Apply clean blue highlight to option container
+    try {
+        target.style.setProperty('outline', '2px solid #3b82f6', 'important');
+        target.style.setProperty('outline-offset', '2px', 'important');
+        target.style.setProperty('box-shadow', '0 0 0 4px rgba(59, 130, 246, 0.2)', 'important');
+        target.style.setProperty('border-radius', '8px', 'important');
+        target.style.setProperty('background-color', 'rgba(59, 130, 246, 0.08)', 'important');
+        target.style.setProperty('transition', 'all 0.25s ease-in-out', 'important');
+        currentHighlightedOption = target;
+        target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch (e) {}
 
-    // 2. Click checkmark span
-    if (checkmark && checkmark !== label) dispatchClick(checkmark);
+    return target;
+}
 
-    // 3. Click input and toggle checked state with input/change events
+// Helper to dispatch a complete, realistic human pointer & click sequence
+function dispatchHumanClick(el) {
+    if (!el) return;
+    try {
+        el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window }));
+        el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+        el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, view: window }));
+        el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window }));
+        el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+    } catch (e) {
+        try {
+            el.dispatchEvent(new Event('click', { bubbles: true, cancelable: true }));
+        } catch (e2) {}
+    }
+    try {
+        el.click();
+    } catch (e) {}
+}
+
+// Deep click selector that firmly clicks and selects the MCQ option on the portal
+function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice = false, uniqueOptionNumbers = null) {
+    if (optionIndex === null || optionIndex === undefined || optionIndex < 0) return false;
+
+    console.log(`[MCQ Auto-Select] Auto-selecting option index ${optionIndex}`);
+
+    // Ensure blue circle highlight is active and visible
+    highlightMCQOption(optionIndex);
+
+    // HackerRank platform handling
+    if (isHackerRank) {
+        if (isMultipleChoice && Array.isArray(uniqueOptionNumbers)) {
+            const checkboxes = document.querySelectorAll('[role="checkbox"]');
+            uniqueOptionNumbers.forEach(idx => {
+                highlightMCQOption(idx);
+                if (checkboxes[idx]) {
+                    const isCurrentlyChecked = checkboxes[idx].getAttribute('aria-checked') === 'true' || 
+                                             checkboxes[idx].getAttribute('data-state') === 'checked' ||
+                                             checkboxes[idx].checked === true;
+                    if (!isCurrentlyChecked) {
+                        dispatchHumanClick(checkboxes[idx]);
+                    }
+                }
+            });
+            return true;
+        }
+
+        const hrRadios = document.querySelectorAll('[role="radio"]');
+        if (hrRadios && hrRadios.length > optionIndex) {
+            dispatchHumanClick(hrRadios[optionIndex]);
+            try { hrRadios[optionIndex].setAttribute('aria-checked', 'true'); } catch(e) {}
+            return true;
+        }
+        const hrBoxes = document.querySelectorAll('[role="checkbox"]');
+        if (hrBoxes && hrBoxes.length > optionIndex) {
+            dispatchHumanClick(hrBoxes[optionIndex]);
+            return true;
+        }
+    }
+
+    // Examly / Iamneo platform handling
+    let target = null;
+    const optionElements = findOptionElements();
+    if (optionElements && optionElements.length > optionIndex) {
+        target = optionElements[optionIndex];
+    }
+    if (!target) {
+        target = document.querySelector(`#tt-option-${optionIndex}`) ||
+                 document.querySelector(`#tt-option-${optionIndex + 1}`) ||
+                 document.querySelector(`div[aria-labelledby="each-option"]:nth-of-type(${optionIndex + 1})`);
+    }
+
+    let checkmark = target ? target.querySelector('span.checkmark1, .checkmark, .checkmark-custom') : null;
+    if (!checkmark) {
+        checkmark = document.querySelector(`#tt-option-${optionIndex} > label > span.checkmark1`) ||
+                    document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
+                    document.querySelector(`#tt-option-${optionIndex + 1} > label > span.checkmark1`) ||
+                    document.querySelector(`#tt-option-${optionIndex + 1} span.checkmark1`);
+    }
+
+    let label = target ? (target.querySelector('label') || (target.tagName && target.tagName.toLowerCase() === 'label' ? target : null)) : null;
+    if (!label) {
+        label = document.querySelector(`#tt-option-${optionIndex} label`) ||
+                document.querySelector(`#tt-option-${optionIndex + 1} label`);
+    }
+
+    let input = target ? target.querySelector('input[type="radio"], input[type="checkbox"]') : null;
+    if (!input) {
+        input = document.querySelector(`#tt-option-${optionIndex} input`) ||
+                document.querySelector(`#tt-option-${optionIndex + 1} input`);
+    }
+
+    // Scroll into view
+    try {
+        const scrollTarget = checkmark || label || target;
+        if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } catch(e) {}
+
+    // Dispatch click on label and checkmark
+    if (label) dispatchHumanClick(label);
+    if (checkmark && checkmark !== label) dispatchHumanClick(checkmark);
+
+    // Toggle radio input and trigger Angular change events
     if (input) {
         try {
             input.checked = true;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (e) {}
-        dispatchClick(input);
-        try {
-            input.checked = true;
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch (e) {}
+        } catch(e) {}
+        dispatchHumanClick(input);
     }
 
-    // 4. Also handle HackerRank radio role
-    const hrRadio = (target.getAttribute && (target.getAttribute('role') === 'radio' || target.getAttribute('role') === 'checkbox')) ? target : target.querySelector('[role="radio"], [role="checkbox"]');
-    if (hrRadio && hrRadio !== label && hrRadio !== checkmark && hrRadio !== input) {
-        dispatchClick(hrRadio);
+    // Also click outer container if separate
+    if (target && target !== label && target !== checkmark && target !== input) {
+        dispatchHumanClick(target);
     }
 
-    // 5. Click outer target container
-    if (target !== label && target !== checkmark && target !== input && target !== hrRadio) {
-        dispatchClick(target);
-    }
-
-    // 6. Post message to MAIN world execution context for Angular Zone.js trigger
+    // Post to MAIN world for Angular Zone.js trigger
     try {
         window.postMessage({
             source: 'neo-extension',
@@ -1054,307 +1112,158 @@ function actuallyClickMCQOption(optionIndex) {
     return true;
 }
 
+// Reliable option click simulator for Angular / Examly / HackerRank (alias for compatibility)
+function triggerOptionClick(optionIndex) {
+    return autoSelectMCQOption(optionIndex);
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'clickMCQOption') {
         (async () => {
             try {
+                isMCQSolving = false;
+                const shouldClick = request.autoClick === true || pendingMCQAutoClick;
+                pendingMCQAutoClick = false;
+
                 // Check if this is HackerRank
                 if (request.isHackerRank) {
                     let clicked = false;
                     
                     // Handle multiple choice questions (checkboxes) differently
                     if (request.isMultipleChoice) {
-                    console.log('Multiple choice question detected, response:', request.response);
-                    
-                    // Enhanced parsing for multiple options
-                    // Look for patterns like: "1. text, 3. text" or "A. text, C. text" or "1, 3" or "A, C"
-                    const optionNumbers = [];
-                    
-                    // Pattern 1: "1. text, 3. text" or "A. text, C. text"
-                    let matches = request.response.match(/([A-Z]|\d+)\.\s*[^,]+/gi);
-                    if (matches) {
-                        matches.forEach(match => {
-                            const num = match.match(/^([A-Z]|\d+)\./);
-                            if (num) {
-                                let optionIndex;
-                                if (isNaN(num[1])) {
-                                    // Convert A,B,C to 0,1,2
-                                    optionIndex = num[1].charCodeAt(0) - 'A'.charCodeAt(0);
-                                } else {
-                                    // Convert 1,2,3 to 0,1,2
-                                    optionIndex = parseInt(num[1]) - 1;
-                                }
-                                if (optionIndex >= 0) {
-                                    optionNumbers.push(optionIndex);
-                                }
-                            }
-                        });
-                    }
-                    
-                    // Pattern 2: Simple comma-separated numbers or letters: "1, 3, 5" or "A, C, E"
-                    if (optionNumbers.length === 0) {
-                        const simpleMatches = request.response.match(/(?:^|[,\s])([A-Z]|\d+)(?=[,\s]|$)/gi);
-                        if (simpleMatches) {
-                            simpleMatches.forEach(match => {
-                                const cleaned = match.trim().replace(/^[,\s]+|[,\s]+$/g, '');
-                                let optionIndex;
-                                if (isNaN(cleaned)) {
-                                    // Convert A,B,C to 0,1,2
-                                    optionIndex = cleaned.charCodeAt(0) - 'A'.charCodeAt(0);
-                                } else {
-                                    // Convert 1,2,3 to 0,1,2
-                                    optionIndex = parseInt(cleaned) - 1;
-                                }
-                                if (optionIndex >= 0) {
-                                    optionNumbers.push(optionIndex);
+                        console.log('Multiple choice question detected, response:', request.response);
+                        
+                        const optionNumbers = [];
+                        let matches = request.response.match(/([A-Z]|\d+)\.\s*[^,]+/gi);
+                        if (matches) {
+                            matches.forEach(match => {
+                                const num = match.match(/^([A-Z]|\d+)\./);
+                                if (num) {
+                                    let optionIndex = isNaN(num[1]) ? (num[1].charCodeAt(0) - 'A'.charCodeAt(0)) : (parseInt(num[1]) - 1);
+                                    if (optionIndex >= 0) {
+                                        optionNumbers.push(optionIndex);
+                                    }
                                 }
                             });
                         }
-                    }
-                    
-                    // Remove duplicates
-                    const uniqueOptionNumbers = [...new Set(optionNumbers)];
-                    
-                    console.log('Parsed multiple choice options:', uniqueOptionNumbers.map(n => n + 1));
-                    
-                    // Click all the selected options for multiple choice
-                    const checkboxes = document.querySelectorAll('[role="checkbox"]');
-                    if (checkboxes.length > 0) {
-                        console.log(`Found ${checkboxes.length} checkboxes, will click options:`, uniqueOptionNumbers.map(n => n + 1));
                         
-                        // Click options with delay to ensure UI state is properly updated
-                        for (let i = 0; i < uniqueOptionNumbers.length; i++) {
-                            const optionNumber = uniqueOptionNumbers[i];
+                        if (optionNumbers.length === 0) {
+                            const simpleMatches = request.response.match(/(?:^|[,\s])([A-Z]|\d+)(?=[,\s]|$)/gi);
+                            if (simpleMatches) {
+                                simpleMatches.forEach(match => {
+                                    const cleaned = match.trim().replace(/^[,\s]+|[,\s]+$/g, '');
+                                    let optionIndex = isNaN(cleaned) ? (cleaned.charCodeAt(0) - 'A'.charCodeAt(0)) : (parseInt(cleaned) - 1);
+                                    if (optionIndex >= 0) {
+                                        optionNumbers.push(optionIndex);
+                                    }
+                                });
+                            }
+                        }
+                        
+                        const uniqueOptionNumbers = [...new Set(optionNumbers)];
+                        console.log('Parsed multiple choice options:', uniqueOptionNumbers.map(n => n + 1));
+                        
+                        lastSolvedMCQ = {
+                            signature: getQuestionSignature(),
+                            questionText: findQuestionElement() ? htmlToText(findQuestionElement()).trim() : '',
+                            optionIndex: uniqueOptionNumbers[0] !== undefined ? uniqueOptionNumbers[0] : 0,
+                            response: request.response,
+                            isHackerRank: true,
+                            isMultipleChoice: true,
+                            uniqueOptionNumbers: uniqueOptionNumbers
+                        };
+
+                        if (shouldClick) {
+                            autoSelectMCQOption(uniqueOptionNumbers[0], true, true, uniqueOptionNumbers);
+                        } else {
+                            uniqueOptionNumbers.forEach(idx => highlightMCQOption(idx));
+                        }
+                        
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: request.response,
+                        });
+                    } else {
+                        // Single choice question
+                        const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
+                        if (optionMatch) {
+                            let optionNumber = isNaN(optionMatch[1]) ? (optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0)) : (parseInt(optionMatch[1]) - 1);
                             
-                            if (optionNumber >= 0 && optionNumber < checkboxes.length) {
-                                const checkbox = checkboxes[optionNumber];
-                                
-                                // Wait a bit before checking and clicking each option
-                                await new Promise(resolve => setTimeout(resolve, 300));
-                                
-                                // Re-check the current state after delay
-                                const isCurrentlyChecked = checkbox.getAttribute('aria-checked') === 'true' || 
-                                                         checkbox.getAttribute('data-state') === 'checked' ||
-                                                         checkbox.checked === true;
-                                
-                                console.log(`Option ${optionNumber + 1} current state: ${isCurrentlyChecked ? 'checked' : 'unchecked'}`);
-                                
-                                // Only click if not already checked
-                                if (!isCurrentlyChecked) {
-                                    console.log(`Clicking checkbox option ${optionNumber + 1}...`);
-                                    
-                                    // Try multiple click methods to ensure it works
-                                    checkbox.click();
-                                    
-                                    // Alternative click method - dispatch events directly
-                                    checkbox.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-                                    checkbox.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
-                                    checkbox.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-                                    
-                                    // Wait a bit more to let the UI update
-                                    await new Promise(resolve => setTimeout(resolve, 200));
-                                    
-                                    // Verify the click worked
-                                    const newState = checkbox.getAttribute('aria-checked') === 'true' || 
-                                                   checkbox.getAttribute('data-state') === 'checked' ||
-                                                   checkbox.checked === true;
-                                    
-                                    if (newState) {
-                                        console.log(`✅ HackerRank checkbox option ${optionNumber + 1} clicked successfully`);
-                                        clicked = true;
-                                    } else {
-                                        console.log(`⚠️ HackerRank checkbox option ${optionNumber + 1} click may have failed - retrying...`);
-                                        
-                                        // Retry once more
-                                        checkbox.click();
-                                        await new Promise(resolve => setTimeout(resolve, 100));
-                                        
-                                        const retryState = checkbox.getAttribute('aria-checked') === 'true' || 
-                                                         checkbox.getAttribute('data-state') === 'checked' ||
-                                                         checkbox.checked === true;
-                                        
-                                        if (retryState) {
-                                            console.log(`✅ HackerRank checkbox option ${optionNumber + 1} clicked successfully on retry`);
-                                            clicked = true;
-                                        } else {
-                                            console.log(`❌ HackerRank checkbox option ${optionNumber + 1} failed to click`);
-                                        }
-                                    }
-                                } else {
-                                    console.log(`✅ HackerRank checkbox option ${optionNumber + 1} already selected`);
-                                    clicked = true; // Still count as successful
-                                }
+                            console.log(`Single choice detected, option: ${optionNumber + 1}`);
+
+                            lastSolvedMCQ = {
+                                signature: getQuestionSignature(),
+                                questionText: findQuestionElement() ? htmlToText(findQuestionElement()).trim() : '',
+                                optionIndex: optionNumber,
+                                response: request.response,
+                                isHackerRank: true,
+                                isMultipleChoice: false
+                            };
+
+                            if (shouldClick) {
+                                autoSelectMCQOption(optionNumber, true, false);
+                            } else {
+                                highlightMCQOption(optionNumber);
                             }
                         }
-                        
-                        // If no options were found, fall back to single option logic
-                        if (uniqueOptionNumbers.length === 0) {
-                            console.log('No multiple options found, falling back to single option logic');
-                            const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
-                            if (optionMatch) {
-                                let optionNumber;
-                                if (isNaN(optionMatch[1])) {
-                                    optionNumber = optionMatch[1].charCodeAt(0) - 'A'.charCodeAt(0);
-                                } else {
-                                    optionNumber = parseInt(optionMatch[1]) - 1;
-                                }
-                                
-                                if (optionNumber >= 0 && optionNumber < checkboxes.length) {
-                                    await new Promise(resolve => setTimeout(resolve, 200));
-                                    
-                                    const checkbox = checkboxes[optionNumber];
-                                    const isCurrentlyChecked = checkbox.getAttribute('aria-checked') === 'true' || 
-                                                             checkbox.getAttribute('data-state') === 'checked' ||
-                                                             checkbox.checked === true;
-                                    
-                                    if (!isCurrentlyChecked) {
-                                        checkbox.click();
-                                        console.log(`HackerRank single checkbox option ${optionNumber + 1} clicked as fallback`);
-                                        clicked = true;
-                                    } else {
-                                        console.log(`HackerRank single checkbox option ${optionNumber + 1} already selected`);
-                                        clicked = true;
-                                    }
-                                }
-                            }
-                        }
+
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: request.response,
+                        });
                     }
                 } else {
-                    // Single choice question - use enhanced logic
-                    const optionMatch = request.response.match(/(?:options?\s*)?([A-Z]|\d+)\.?/i);
-                    if (optionMatch) {
-                        let optionNumber;
-                        if (isNaN(optionMatch[1])) {
-                            // Handle letter options (A, B, C, etc.)
-                            optionNumber = optionMatch[1].toUpperCase().charCodeAt(0) - 'A'.charCodeAt(0);
-                        } else {
-                            // Handle number options (1, 2, 3, etc.)
-                            optionNumber = parseInt(optionMatch[1]) - 1;
-                        }
-                        
-                        console.log(`Single choice detected, clicking option: ${optionNumber + 1}`);
-                        
-                        // Add a small delay before clicking
-                        await new Promise(resolve => setTimeout(resolve, 200));
-                        
-                        // Try new layout first - check for radio buttons
-                        const newLayoutRadios = document.querySelectorAll('[role="radio"]');
-                        if (newLayoutRadios.length > optionNumber && optionNumber >= 0) {
-                            const radio = newLayoutRadios[optionNumber];
-                            
-                            // Check if already selected
-                            const isCurrentlySelected = radio.getAttribute('aria-checked') === 'true' || 
-                                                      radio.getAttribute('data-state') === 'checked' ||
-                                                      radio.checked === true;
-                            
-                            highlightMCQOption(optionNumber);
-                            if (request.autoClick) {
-                                if (!isCurrentlySelected) {
-                                    radio.click();
-                                    console.log(`HackerRank new layout radio option ${optionNumber + 1} clicked successfully`);
-                                }
-                            }
-                            clicked = true;
-                        } else {
-                            // Try checkboxes if no radio buttons found (fallback for single checkbox)
-                            const newLayoutCheckboxes = document.querySelectorAll('[role="checkbox"]');
-                            if (newLayoutCheckboxes.length > optionNumber && optionNumber >= 0) {
-                                const checkbox = newLayoutCheckboxes[optionNumber];
-                                
-                                const isCurrentlyChecked = checkbox.getAttribute('aria-checked') === 'true' || 
-                                                         checkbox.getAttribute('data-state') === 'checked' ||
-                                                         checkbox.checked === true;
-                                
-                                highlightMCQOption(optionNumber);
-                                if (request.autoClick) {
-                                    if (!isCurrentlyChecked) {
-                                        checkbox.click();
-                                        console.log(`HackerRank new layout checkbox option ${optionNumber + 1} clicked successfully`);
-                                    }
-                                }
-                                clicked = true;
-                            } else {
-                                // Fallback to old layout (radio buttons)
-                                const questionContainer = document.querySelector('.grouped-mcq__question');
-                                if (questionContainer) {
-                                    const radios = questionContainer.querySelectorAll('input[type="radio"]');
-                                    if (radios.length > optionNumber && optionNumber >= 0) {
-                                        const radio = radios[optionNumber];
-                                        
-                                        highlightMCQOption(optionNumber);
-                                        if (request.autoClick) {
-                                            if (!radio.checked) {
-                                                radio.click();
-                                                console.log(`HackerRank old layout option ${optionNumber + 1} clicked successfully`);
-                                            }
-                                        }
-                                        clicked = true;
-                                    }
-                                }
-                            }
+                    // Examly / Iamneo platform
+                    console.log('[MCQ] Received answer for Examly:', request.response);
+                    let optionIndex = parseMCQAnswer(request.response, request.rawOptions);
+                    if (optionIndex === null || optionIndex < 0) {
+                        const optionMatch = request.response.match(/(?:options?\s*)?(\d+)\.?/i);
+                        if (optionMatch) {
+                            optionIndex = parseInt(optionMatch[1]) - 1;
                         }
                     }
-                }
-                
-                if (!clicked) {
-                    chrome.runtime.sendMessage({
-                        action: 'showMCQToast',
-                        message: request.response,
-                    });
-                }
-            } else {
-                // Examly / Iamneo platform
-                console.log('[MCQ] Received answer for Examly:', request.response);
-                const optionIndex = parseMCQAnswer(request.response, request.rawOptions);
-                const qEl = findQuestionElement();
-                const qText = qEl ? htmlToText(qEl) : '';
-                
-                if (optionIndex !== null && optionIndex >= 0) {
-                    lastSolvedMCQ = {
-                        questionText: qText,
-                        optionIndex: optionIndex,
-                        response: request.response,
-                        rawOptions: request.rawOptions
-                    };
+
+                    const qEl = findQuestionElement();
+                    const qText = qEl ? htmlToText(qEl).trim() : '';
+
+                    if (optionIndex !== null && optionIndex >= 0) {
+                        lastSolvedMCQ = {
+                            signature: getQuestionSignature(),
+                            questionText: qText,
+                            optionIndex: optionIndex,
+                            response: request.response,
+                            rawOptions: request.rawOptions,
+                            isHackerRank: false
+                        };
+
+                        if (shouldClick) {
+                            autoSelectMCQOption(optionIndex);
+                            console.log(`[MCQ] Auto-selected option index ${optionIndex}`);
+                        } else {
+                            highlightMCQOption(optionIndex);
+                            console.log(`[MCQ] Highlighted option index ${optionIndex} with blue circle`);
+                        }
+                    }
 
                     let cleanResponse = (request.response || '').trim();
                     let toastMsg = cleanResponse;
-                    if (!cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
+                    if (optionIndex !== null && optionIndex >= 0 && 
+                        !cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
                         !cleanResponse.toLowerCase().startsWith('option')) {
                         toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
                     }
 
-                    if (request.autoClick) {
-                        // Alt+S mode: physically click and select the MCQ option itself
-                        actuallyClickMCQOption(optionIndex);
-                        console.log(`[MCQ] Auto-clicked option index ${optionIndex}`);
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: `Option ${optionIndex + 1} Selected`
-                        });
-                    } else {
-                        // Alt+A mode: show option with blue circle like highlight
-                        highlightMCQOption(optionIndex);
-                        triggerOptionClick(optionIndex);
-                        console.log(`[MCQ] Indicated option index ${optionIndex} with blue circle`);
-                        chrome.runtime.sendMessage({
-                            action: 'showMCQToast',
-                            message: toastMsg
-                        });
-                    }
-                } else {
                     chrome.runtime.sendMessage({
                         action: 'showMCQToast',
-                        message: request.response || 'No matching option found'
+                        message: toastMsg || request.response
                     });
                 }
+            } catch (error) {
+                chrome.runtime.sendMessage({
+                    action: 'showMCQToast',
+                    message: request.response,
+                });
             }
-        } catch (error) {
-            chrome.runtime.sendMessage({
-                action: 'showMCQToast',
-                message: request.response,
-            });
-        }
         })();
     }
 });
@@ -1746,7 +1655,7 @@ async function insertCodeIntoMonacoEditor(text) {
 }
 
 // Function to handle HackerRank extraction (both MCQ and coding, updated for new layout)
-function handleHackerRankMCQ() {
+function handleHackerRankMCQ(autoClick = false) {
     // Check if it's a coding question first (Monaco editor present)
     const monacoEditor = document.querySelector('.monaco-editor, .hr-monaco-editor');
     
@@ -1922,7 +1831,8 @@ ${codingData.starterCode}
             options: optionsText,
             isHackerRank: true,
             isMCQ: true,
-            isMultipleChoice: isMultipleChoice  // Add flag for multiple choice questions
+            isMultipleChoice: isMultipleChoice,  // Add flag for multiple choice questions
+            autoClick: autoClick
         }, (response) => {
             console.log("Response from background:", response);
         });
@@ -1946,7 +1856,7 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (isActionThrottled()) return;
-        handleHackerRankMCQ();
+        handleHackerRankMCQ(false);
     }
 }, true); // useCapture: true to intercept before Monaco/HackerRank portal listeners
 
