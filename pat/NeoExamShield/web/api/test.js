@@ -20,7 +20,7 @@ export default async function handler(req, res) {
                 requestBody = { model: modelName || 'gpt-4o-mini', messages: [{ role: 'user', content: 'Say hello' }] };
                 break;
             case 'google':
-                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-3.5-flash'}:generateContent?key=${apiKey}`;
+                apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-3.6-flash'}:generateContent?key=${apiKey}`;
                 headers = { 'Content-Type': 'application/json' };
                 requestBody = { contents: [{ parts: [{ text: 'Say hello' }] }] };
                 break;

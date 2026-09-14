@@ -2041,7 +2041,7 @@
 
                 <div class="form-group" style="margin-bottom: 0.75rem;">
                     <label class="form-label">Model Identifier</label>
-                    <input type="text" id="model-${id}" class="form-control" placeholder="e.g. gemini-3.5-flash" value="${modelName}">
+                    <input type="text" id="model-${id}" class="form-control" placeholder="e.g. gemini-3.6-flash" value="${modelName}">
                 </div>
 
                 <div style="display: flex; gap: 8px; margin-top: 0.75rem;">
@@ -2135,7 +2135,7 @@
 
                 // Direct client testing for Google Gemini
                 if (provider === 'google') {
-                    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-3.5-flash'}:generateContent?key=${apiKey}`;
+                    const testUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName || 'gemini-3.6-flash'}:generateContent?key=${apiKey}`;
                     const res = await fetch(testUrl, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
