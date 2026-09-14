@@ -294,6 +294,7 @@ let isMCQSolving = false;
 let pendingMCQAutoClick = false;
 let currentActiveQuestionSignature = '';
 let activeMCQMode = 'autoSelect';
+let lastTriggeredMode = 'autoSelect';
 
 // Helper to get a unique signature of the currently visible question
 function getQuestionSignature() {
@@ -316,8 +317,23 @@ function getQuestionSignature() {
 
 // Function to handle when question changes to a new one
 function checkAndHandleQuestionChange() {
+    // If AI is currently solving, NEVER abort or wipe pending solve flags
+    if (isMCQSolving) return;
+
     const newSig = getQuestionSignature();
     if (newSig && currentActiveQuestionSignature && newSig !== currentActiveQuestionSignature) {
+        const currentQEl = findQuestionElement();
+        const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
+
+        // Double check: if question text is still identical, do not invalidate solve cache
+        if (lastSolvedMCQ && lastSolvedMCQ.questionText && currentQText && 
+            (lastSolvedMCQ.questionText === currentQText || 
+             lastSolvedMCQ.questionText.includes(currentQText.substring(0, 40)) ||
+             currentQText.includes(lastSolvedMCQ.questionText.substring(0, 40)))) {
+            currentActiveQuestionSignature = newSig;
+            return;
+        }
+
         currentActiveQuestionSignature = newSig;
         lastSolvedMCQ = null;
         isMCQSolving = false;
@@ -343,11 +359,14 @@ document.addEventListener('click', (e) => {
 
 // Function to handle question, code, and options extraction with full image & diagram support
 async function handleQuestionExtraction(autoClick = true) {
-    console.log('[MCQ] Starting question extraction with autoClick =', autoClick);
+    const isAuto = Boolean(autoClick || activeMCQMode === 'autoSelect' || lastTriggeredMode === 'autoSelect');
+    console.log('[MCQ] Starting question extraction with autoClick =', isAuto);
     checkAndHandleQuestionChange();
     currentActiveQuestionSignature = getQuestionSignature();
     isMCQSolving = true;
-    pendingMCQAutoClick = Boolean(autoClick);
+    pendingMCQAutoClick = isAuto;
+    activeMCQMode = isAuto ? 'autoSelect' : 'reveal';
+    lastTriggeredMode = activeMCQMode;
 
     // 1. Extract question text
     const questionElement = findQuestionElement();
@@ -428,7 +447,9 @@ async function handleQuestionExtraction(autoClick = true) {
         rawOptions: rawOptions,
         images: allImages,
         isMCQ: true,
-        autoClick: autoClick
+        autoClick: isAuto,
+        mode: isAuto ? 'autoSelect' : 'reveal',
+        shortcut: isAuto ? 'alt_s' : 'alt_a'
     });
 }
 
@@ -656,6 +677,8 @@ document.addEventListener('keydown', (event) => {
         event.stopPropagation();
         if (isActionThrottled('alt_a')) return;
         activeMCQMode = 'reveal';
+        lastTriggeredMode = 'reveal';
+        pendingMCQAutoClick = false;
         solveIamneoExamly();
     }
 }, true); // useCapture: true to intercept before portal listeners
@@ -678,6 +701,8 @@ document.addEventListener('keydown', (event) => {
         }
 
         activeMCQMode = 'autoSelect';
+        lastTriggeredMode = 'autoSelect';
+        pendingMCQAutoClick = true;
         removeMCQDot(); // Remove any dot from prior Alt+A immediately
 
         checkAndHandleQuestionChange();
@@ -698,13 +723,25 @@ document.addEventListener('keydown', (event) => {
 
         if (isMatch) {
             console.log('[Alt+S] Instantly auto-selecting previously solved MCQ option:', lastSolvedMCQ.optionIndex);
+            removeMCQDot();
             autoSelectMCQOption(lastSolvedMCQ.optionIndex, lastSolvedMCQ.isHackerRank, lastSolvedMCQ.isMultipleChoice, lastSolvedMCQ.uniqueOptionNumbers);
+            let cleanResponse = (lastSolvedMCQ.response || '').trim();
+            let toastMsg = cleanResponse || `Option ${lastSolvedMCQ.optionIndex + 1}`;
+            if (lastSolvedMCQ.optionIndex !== null && lastSolvedMCQ.optionIndex >= 0 && 
+                !toastMsg.toLowerCase().startsWith(`option ${lastSolvedMCQ.optionIndex + 1}`) && 
+                !toastMsg.toLowerCase().startsWith('option')) {
+                toastMsg = `Option ${lastSolvedMCQ.optionIndex + 1}: ${toastMsg}`;
+            }
+            chrome.runtime.sendMessage({
+                action: 'showMCQToast',
+                message: `Selected: ${toastMsg}`
+            });
             return;
         }
 
-        // If AI is currently solving this question, queue auto-click so it clicks as soon as AI finishes
+        // If AI is currently solving this question, ensure auto-click is armed
         if (isMCQSolving) {
-            console.log('[Alt+S] AI is currently solving - queued auto-click');
+            console.log('[Alt+S] AI is currently solving - armed auto-click');
             pendingMCQAutoClick = true;
             return;
         }
@@ -1122,48 +1159,37 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
     } catch(e) {}
 
     // Trigger clicks on checkmark, label, input, and container to guarantee Angular selection
-    if (checkmark) {
-        try { checkmark.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
-        try { checkmark.click(); } catch(e) {}
-    }
-
-    if (label) {
-        try { label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
-        try { label.click(); } catch(e) {}
-    }
-
-    if (input) {
-        try {
+    function performDeepClick() {
+        if (checkmark) dispatchHumanClick(checkmark);
+        if (label) dispatchHumanClick(label);
+        if (input) {
             input.checked = true;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-            input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
-            input.click();
-        } catch(e) {}
-    }
+            dispatchHumanClick(input);
+        }
+        if (target) dispatchHumanClick(target);
 
-    if (target) {
-        try { target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window })); } catch(e) {}
-        try { target.click(); } catch(e) {}
-    }
-
-    // Ensure input is checked and dispatch Angular change events
-    if (input && !input.checked) {
-        try {
+        // Ensure input is checked and dispatch Angular change events
+        if (input && !input.checked) {
             input.checked = true;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
-        } catch(e) {}
+        }
+
+        // Post to MAIN world for Angular Zone.js trigger
+        try {
+            window.postMessage({
+                source: 'neo-extension',
+                action: 'forceSelectMCQOption',
+                optionIndex: optionIndex
+            }, '*');
+        } catch (e) {}
     }
 
-    // Post to MAIN world for Angular Zone.js trigger
-    try {
-        window.postMessage({
-            source: 'neo-extension',
-            action: 'forceSelectMCQOption',
-            optionIndex: optionIndex
-        }, '*');
-    } catch (e) {}
+    performDeepClick();
+    setTimeout(performDeepClick, 50);
+    setTimeout(performDeepClick, 150);
 
     return true;
 }
@@ -1178,7 +1204,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 isMCQSolving = false;
-                const isAutoClick = (request.autoClick === true) || (activeMCQMode === 'autoSelect') || pendingMCQAutoClick;
+                const isAutoClick = (request.autoClick === true) || 
+                                    (request.mode === 'autoSelect') || 
+                                    (activeMCQMode === 'autoSelect') || 
+                                    (lastTriggeredMode === 'autoSelect') || 
+                                    pendingMCQAutoClick;
                 pendingMCQAutoClick = false;
 
                 // Check if this is HackerRank
@@ -1232,6 +1262,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         if (isAutoClick) {
                             removeMCQDot();
                             autoSelectMCQOption(uniqueOptionNumbers[0], true, true, uniqueOptionNumbers);
+                            chrome.runtime.sendMessage({
+                                action: 'showMCQToast',
+                                message: `Selected: ${request.response}`
+                            });
                         } else {
                             removeMCQDot();
                             uniqueOptionNumbers.forEach(idx => showMCQSmallDot(idx, false));
@@ -1260,6 +1294,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             if (isAutoClick) {
                                 removeMCQDot();
                                 autoSelectMCQOption(optionNumber, true, false);
+                                chrome.runtime.sendMessage({
+                                    action: 'showMCQToast',
+                                    message: `Selected: Option ${optionNumber + 1}`
+                                });
                             } else {
                                 showMCQSmallDot(optionNumber);
                                 chrome.runtime.sendMessage({
@@ -1293,20 +1331,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             isHackerRank: false
                         };
 
+                        let cleanResponse = (request.response || '').trim();
+                        let toastMsg = cleanResponse;
+                        if (optionIndex !== null && optionIndex >= 0 && 
+                            !cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
+                            !cleanResponse.toLowerCase().startsWith('option')) {
+                            toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
+                        }
+
                         if (isAutoClick) {
                             removeMCQDot();
                             autoSelectMCQOption(optionIndex);
-                            console.log(`[MCQ] Auto-selected option index ${optionIndex} (no extra UI)`);
+                            console.log(`[MCQ] Auto-selected option index ${optionIndex} on first solve!`);
+
+                            chrome.runtime.sendMessage({
+                                action: 'showMCQToast',
+                                message: `Selected: ${toastMsg}`
+                            });
                         } else {
                             showMCQSmallDot(optionIndex);
                             console.log(`[MCQ] Indicated option index ${optionIndex} with small dot`);
-                            let cleanResponse = (request.response || '').trim();
-                            let toastMsg = cleanResponse;
-                            if (optionIndex !== null && optionIndex >= 0 && 
-                                !cleanResponse.toLowerCase().startsWith(`option ${optionIndex + 1}`) && 
-                                !cleanResponse.toLowerCase().startsWith('option')) {
-                                toastMsg = `Option ${optionIndex + 1}: ${cleanResponse}`;
-                            }
 
                             chrome.runtime.sendMessage({
                                 action: 'showMCQToast',
@@ -1314,23 +1358,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             });
                         }
                     } else {
-                        // If optionIndex could not be resolved, show toast ONLY if in Alt+A mode
-                        if (!isAutoClick) {
-                            console.warn('[MCQ] Could not resolve option index from AI response:', request.response);
-                            chrome.runtime.sendMessage({
-                                action: 'showMCQToast',
-                                message: request.response
-                            });
-                        }
+                        // If optionIndex could not be resolved, show toast
+                        console.warn('[MCQ] Could not resolve option index from AI response:', request.response);
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: request.response
+                        });
                     }
                 }
             } catch (error) {
-                if (!isAutoClick) {
-                    chrome.runtime.sendMessage({
-                        action: 'showMCQToast',
-                        message: request.response,
-                    });
-                }
+                console.error('[MCQ] Error handling answer:', error);
             }
         })();
     }

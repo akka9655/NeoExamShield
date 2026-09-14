@@ -686,7 +686,8 @@ function stripCodeComments(code) {
     return finalLines.join('\n').trim();
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true) {
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true, mode = '') {
+    const shouldAutoClick = Boolean(autoClick === true || mode === 'autoSelect');
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
         if (isMCQ) {
@@ -696,12 +697,12 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 rawOptions: rawOptions,
                 isHackerRank: isHackerRank,
                 isMultipleChoice: isMultipleChoice,
-                autoClick: Boolean(autoClick)
+                autoClick: shouldAutoClick,
+                mode: shouldAutoClick ? 'autoSelect' : 'reveal'
             });
 
             // MAIN world backup click for rock-solid DOM trigger (only if auto-clicking)
-            if (autoClick) {
-                removeExistingToast(tabId);
+            if (shouldAutoClick) {
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
                     func: function(respText) {
@@ -716,32 +717,36 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                             const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
                             if (idx < 0) return;
 
-                            let el = document.querySelector('#tt-option-' + idx) ||
-                                     document.querySelector('#tt-option-' + (idx + 1));
-                            if (!el) {
-                                const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-                                if (all && all.length > idx) el = all[idx];
-                            }
-                            if (el) {
-                                const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
-                                const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
-                                const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
-                                if (chk) {
-                                    chk.click();
-                                } else if (lbl) {
-                                    lbl.click();
-                                } else if (inp) {
-                                    inp.click();
-                                } else {
-                                    el.click();
+                            function triggerHumanClick() {
+                                let el = document.querySelector('#tt-option-' + idx) ||
+                                         document.querySelector('#tt-option-' + (idx + 1));
+                                if (!el) {
+                                    const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+                                    if (all && all.length > idx) el = all[idx];
                                 }
+                                if (el) {
+                                    const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+                                    const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
+                                    const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
+                                    const target = chk || lbl || inp || el;
 
-                                if (inp && !inp.checked) {
-                                    inp.checked = true;
-                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                    const opts = { bubbles: true, cancelable: true, view: window };
+                                    target.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                    target.dispatchEvent(new MouseEvent('mousedown', opts));
+                                    target.dispatchEvent(new PointerEvent('pointerup', opts));
+                                    target.dispatchEvent(new MouseEvent('mouseup', opts));
+                                    target.click();
+
+                                    if (inp && !inp.checked) {
+                                        inp.checked = true;
+                                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                        inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                    }
                                 }
                             }
+                            triggerHumanClick();
+                            setTimeout(triggerHumanClick, 50);
+                            setTimeout(triggerHumanClick, 150);
                         } catch(e) {}
                     },
                     args: [response],
@@ -1714,10 +1719,8 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     length: queryText.length
                 });
 
-                // Show spinner toast immediately so the user has visual feedback (only if not silent auto-click)
-                if (!request.autoClick) {
-                    showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
-                }
+                // Show spinner toast immediately so the user has visual feedback (respects areToastsEnabled)
+                showSpinnerToast(sender.tab.id, request.isMCQ ? (request.autoClick ? 'Auto-selecting MCQ...' : 'Solving MCQ...') : 'Generating code solution...');
 
                 // Send query and handle response
                 const reqImages = request.images || (request.image ? [request.image] : null);
@@ -1734,7 +1737,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         responseLength: response.length
                     });
                     
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode);
                     sendResponse({
                         success: true,
                         response,
@@ -1742,7 +1745,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     });
                 } else if (response && response.error) {
                     // Error case - handle the error through the response handler
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode);
                     sendResponse({
                         error: response.error,
                         status: 'error',
@@ -1751,7 +1754,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                 } else {
                     // Fallback case
                     console.error('No response received from AI service');
-                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick);
+                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick, request.mode);
                     sendResponse({
                         error: 'No response from query service',
                         status: 'error',
