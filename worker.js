@@ -1246,7 +1246,8 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 800 : 4096
+            maxOutputTokens: isMCQ ? 800 : 4096,
+            thinkingConfig: { thinkingBudget: 0 }
         };
 
         const requestBody = {
