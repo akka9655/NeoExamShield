@@ -882,32 +882,49 @@ let preferredKey = null; // currently active, fast-responding key
 function getPrioritizedConfigs(configs) {
     if (!configs || configs.length <= 1) return configs;
     const now = Date.now();
-    const ready = [];
-    const cooling = [];
+    const readyCustom = [];
+    const readyDefault = [];
+    const coolingCustom = [];
+    const coolingDefault = [];
 
     for (const cfg of configs) {
         const until = keyCooldowns.get(cfg.apiKey) || 0;
-        if (now >= until) {
-            ready.push(cfg);
+        const isReady = now >= until;
+        if (cfg.isCustom) {
+            if (isReady) readyCustom.push(cfg);
+            else coolingCustom.push({ cfg, until });
         } else {
-            cooling.push({ cfg, until });
+            if (isReady) readyDefault.push(cfg);
+            else coolingDefault.push({ cfg, until });
         }
     }
 
     // Sort cooling keys by shortest remaining wait time
-    cooling.sort((a, b) => a.until - b.until);
-    const sortedCooling = cooling.map(c => c.cfg);
+    coolingCustom.sort((a, b) => a.until - b.until);
+    coolingDefault.sort((a, b) => a.until - b.until);
 
-    // Prioritize the preferred working key first among ready keys
+    // Prioritize preferred working key among ready keys
     if (preferredKey) {
-        const prefIdx = ready.findIndex(c => c.apiKey === preferredKey);
-        if (prefIdx > 0) {
-            const [pk] = ready.splice(prefIdx, 1);
-            ready.unshift(pk);
+        const customIdx = readyCustom.findIndex(c => c.apiKey === preferredKey);
+        if (customIdx > 0) {
+            const [pk] = readyCustom.splice(customIdx, 1);
+            readyCustom.unshift(pk);
+        } else {
+            const defIdx = readyDefault.findIndex(c => c.apiKey === preferredKey);
+            if (defIdx > 0) {
+                const [pk] = readyDefault.splice(defIdx, 1);
+                readyDefault.unshift(pk);
+            }
         }
     }
 
-    return [...ready, ...sortedCooling];
+    // Hierarchy: 1) User custom ready keys, 2) Default ready keys, 3) User cooling keys, 4) Default cooling keys
+    return [
+        ...readyCustom,
+        ...readyDefault,
+        ...coolingCustom.map(c => c.cfg),
+        ...coolingDefault.map(c => c.cfg)
+    ];
 }
 
 // Enhanced queryRequest function with comprehensive error handling
@@ -945,14 +962,14 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
                     return result; // Success
                 }
                 
-                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 45s (free tier 15 RPM)
+                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 30s (free tier rolling window)
                 const isRateLimit = result && (
                     result.status === 429 || 
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('quota')) ||
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('resource_exhausted'))
                 );
                 if (isRateLimit) {
-                    keyCooldowns.set(config.apiKey, Date.now() + 45000);
+                    keyCooldowns.set(config.apiKey, Date.now() + 30000);
                 } else if (result && result.status === 400) {
                     const errStr = ((result.detailedInfo || '') + ' ' + (result.error || '')).toLowerCase();
                     if (errStr.includes('api_key_invalid') || errStr.includes('key not valid') || errStr.includes('invalid api key')) {
@@ -1144,7 +1161,7 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
     }
 }// Helper function to get custom API configuration
 
-// Function to retrieve custom AI API configs in priority order
+// Function to retrieve custom AI API configs in priority order with auto-fallback pool
 async function getCustomAPIConfigs() {
     return new Promise((resolve) => {
         chrome.storage.local.get([
@@ -1152,8 +1169,12 @@ async function getCustomAPIConfigs() {
             'aiProvider',
             'customEndpoint',
             'customAPIKey',
-            'customModelName'
+            'customModelName',
+            'linkedCode'
         ], (result) => {
+            const userConfigs = [];
+
+            // 1. User custom code keys (from setup page / 3-digit link)
             if (result.apiConfigs && Array.isArray(result.apiConfigs) && result.apiConfigs.length > 0) {
                 const validConfigs = result.apiConfigs
                     .filter(c => c && c.apiKey && String(c.apiKey).trim().length > 0)
@@ -1161,36 +1182,49 @@ async function getCustomAPIConfigs() {
                         aiProvider: c.aiProvider || 'google',
                         customEndpoint: c.customEndpoint || '',
                         apiKey: String(c.apiKey).trim(),
-                        modelName: c.modelName || ''
+                        modelName: c.modelName || 'gemini-3.6-flash',
+                        isCustom: true
                     }));
-                
-                if (validConfigs.length > 0) {
-                    return resolve(validConfigs);
-                }
+                userConfigs.push(...validConfigs);
             }
 
+            // 2. Legacy / direct custom API key from settings
             if (result.customAPIKey && String(result.customAPIKey).trim().length > 0) {
-                return resolve([{
+                userConfigs.push({
                     aiProvider: result.aiProvider || 'google',
                     customEndpoint: result.customEndpoint || '',
                     apiKey: String(result.customAPIKey).trim(),
-                    modelName: result.customModelName || ''
-                }]);
+                    modelName: result.customModelName || 'gemini-3.6-flash',
+                    isCustom: true
+                });
             }
 
-            // Fallback default API key pool (works out-of-the-box for free tier)
+            // 3. Built-in high-availability API key pool (automatic fallback for free-tier users)
             const defaultKeys = [
                 "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
                 "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
                 "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
                 "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
             ];
-            resolve(defaultKeys.map(key => ({
+            const defaultPool = defaultKeys.map(key => ({
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.6-flash'
-            })));
+                modelName: 'gemini-3.6-flash',
+                isCustom: false
+            }));
+
+            // User custom keys ALWAYS take top priority. Default pool serves as seamless auto-fallback
+            const seen = new Set();
+            const combined = [];
+            for (const cfg of [...userConfigs, ...defaultPool]) {
+                if (!seen.has(cfg.apiKey)) {
+                    seen.add(cfg.apiKey);
+                    combined.push(cfg);
+                }
+            }
+
+            resolve(combined);
         });
     });
 }
@@ -1249,7 +1283,16 @@ async function resolveImageToBase64(imgUrlOrData) {
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
     const defaultModel = 'gemini-3.6-flash';
     const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
-    const fallbackModels = [primary, 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-flash-latest', 'gemini-flash-lite-latest'];
+    const fallbackModels = [
+        primary, 
+        'gemini-3.6-flash', 
+        'gemini-2.5-flash', 
+        'gemini-2.0-flash', 
+        'gemini-1.5-flash', 
+        'gemini-flash-latest', 
+        'gemini-3.1-flash-lite', 
+        'gemini-flash-lite-latest'
+    ];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
@@ -1300,14 +1343,16 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
                 const errData = await response.json().catch(() => ({}));
                 const errMsg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
                 
-                // If rate limit (429) or quota exhausted, immediately break and return error so key rotation takes over
+                // If rate limit (429) or quota exhausted, switch to next model immediately (free tier quotas are per-model)
                 if (response.status === 429 || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
-                    return {
+                    lastError = {
                         error: `Gemini rate limit exceeded: ${response.status}`,
                         errorType: 'api',
                         status: 429,
                         detailedInfo: errMsg
                     };
+                    console.warn(`[Gemini Free Tier Auto-Fallback] Model ${currentModel} reached quota/rate limit (429). Instantly switching to next model on this key...`);
+                    continue; // Try next fallback model on same key!
                 }
 
                 // If invalid key (400), break immediately
