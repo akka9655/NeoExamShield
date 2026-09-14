@@ -19,19 +19,24 @@ if (typeof window.isMac === 'undefined') {
 
   // Find the answer Ace editor on the page (only the editable answer editor)
   function findAnswerEditor() {
-    const answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-    if (answerEl && typeof ace !== 'undefined') {
-      try {
-        return ace.edit(answerEl);
-      } catch(e) {}
+    // Check 1: Explicit answer editor ID, aria label, or container
+    const answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
+    if (answerEl) {
+      if (answerEl.env && answerEl.env.editor) return answerEl.env.editor;
+      if (typeof ace !== 'undefined') {
+        try {
+          const ed = ace.edit(answerEl.id || answerEl);
+          if (ed) return ed;
+        } catch(e) {}
+      }
     }
     // Fallback: find first non-readonly ACE editor
     if (typeof ace !== 'undefined') {
       const editors = document.querySelectorAll('.ace_editor');
       for (const el of editors) {
         try {
-          const ed = ace.edit(el);
-          if (!ed.getReadOnly()) return ed;
+          const ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
+          if (ed && !ed.getReadOnly()) return ed;
         } catch(e) {}
       }
     }

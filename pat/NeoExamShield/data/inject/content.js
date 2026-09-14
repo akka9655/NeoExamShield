@@ -191,8 +191,8 @@ function findOptionElements() {
     opts = document.querySelectorAll('testtaking-options .t-flex.t-flex-row, .grouped-mcq__options label, [role="radiogroup"] [role="radio"]');
     if (opts && opts.length > 0) return Array.from(opts);
 
-    // Check 5: Look for radio or checkbox inputs in testtaking-options or question container
-    const inputs = document.querySelectorAll('input[type="radio"], input[type="checkbox"]');
+    // Check 5: Look for radio or checkbox inputs strictly inside testtaking-options or MCQ containers
+    const inputs = document.querySelectorAll('testtaking-options input[type="radio"], testtaking-options input[type="checkbox"], div[aria-labelledby="testtaking-options"] input, .grouped-mcq input, [aria-labelledby="question-answer"] input[type="radio"], [aria-labelledby="question-answer"] input[type="checkbox"]');
     if (inputs && inputs.length > 0) {
         const optionContainers = [];
         inputs.forEach(inp => {
@@ -592,35 +592,35 @@ async function extractCodingQuestion(isTyped = false) {
     });
 }
 
-// Throttle guard to prevent rapid double-triggering
-let lastActionTimestamp = 0;
-function isActionThrottled() {
+// Throttle guard to prevent rapid accidental double-triggering while allowing quick action switching
+const lastActionTimestamps = {};
+function isActionThrottled(actionType = 'default') {
     const now = Date.now();
-    if (now - lastActionTimestamp < 2000) {
+    const last = lastActionTimestamps[actionType] || 0;
+    if (now - last < 600) {
         return true;
     }
-    lastActionTimestamp = now;
+    lastActionTimestamps[actionType] = now;
     return false;
 }
 
 // Helper to accurately detect if current page is a coding question vs an MCQ
 function isCodingQuestionPage() {
-    // 1. If MCQ options exist on the page, it is definitely NOT a coding question
+    // 1. Explicit coding elements on Examly / Iamneo / HackerRank
+    const codingElement = document.querySelector('programming-question, programming-answer, #programme-compile, app-language-dropdown, div[aria-labelledby="code-constraints"], div[aria-labelledby="input-format"], div[aria-labelledby="editor-answer"], [id*="ttAnswerEditor"], .hr-monaco-editor, .monaco-editor');
+    if (codingElement) return true;
+
+    // 2. Ace editor (must be visible/active)
+    const aceEl = document.querySelector('.ace_editor');
+    if (aceEl && (aceEl.offsetWidth > 0 || aceEl.offsetHeight > 0)) {
+        return true;
+    }
+
+    // 3. If MCQ options exist on the page, it is an MCQ
     const optionElements = findOptionElements();
     if (optionElements && optionElements.length > 0) return false;
     if (document.querySelector('[id^="tt-option-"], div[aria-labelledby="each-option"], [aria-labelledby="each-option-card"], .grouped-mcq__options, [role="radiogroup"], testtaking-options')) {
         return false;
-    }
-
-    // 2. Explicit coding elements on Examly / Iamneo / HackerRank
-    // Note: Do not include footer submit buttons as they exist on all page footers
-    const codingElement = document.querySelector('div[aria-labelledby="input-format"], programming-question, programming-answer, #programme-compile, app-language-dropdown, div[aria-labelledby="code-constraints"], .hr-monaco-editor');
-    if (codingElement) return true;
-
-    // 3. Ace editor (must be visible/active, not 0-dimension hidden container)
-    const aceEl = document.querySelector('.ace_editor');
-    if (aceEl && (aceEl.offsetWidth > 0 || aceEl.offsetHeight > 0)) {
-        return true;
     }
 
     return false;
@@ -648,12 +648,13 @@ document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyA = event.code === 'KeyA' || 
                    (event.key && event.key.toLowerCase() === 'a') || 
+                   event.keyCode === 65 || event.which === 65 ||
                    event.key === 'å' || event.key === 'Å';
 
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyA) {
         event.preventDefault();
         event.stopPropagation();
-        if (isActionThrottled()) return;
+        if (isActionThrottled('alt_a')) return;
         solveIamneoExamly();
     }
 }, true); // useCapture: true to intercept before portal listeners
@@ -669,6 +670,7 @@ document.addEventListener('keydown', (event) => {
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyS) {
         event.preventDefault();
         event.stopPropagation();
+        if (isActionThrottled('alt_s')) return;
 
         if (isCodingQuestionPage()) {
             return;
@@ -721,11 +723,22 @@ document.addEventListener('keydown', (event) => {
 // Alt+T (Option+T on macOS): Instant code insertion into editor
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyT = event.code === 'KeyT' || 
+                   (event.key && event.key.toLowerCase() === 't') ||
+                   event.keyCode === 84 || event.which === 84 ||
+                   event.key === '†';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyT' || (event.key && event.key.toLowerCase() === 't'))) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyT) {
         event.preventDefault();
         event.stopPropagation();
-        if (isActionThrottled()) return;
+        if (isActionThrottled('alt_t')) return;
+
+        const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
+                                 document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
+        if (isHackerRankSite) {
+            handleHackerRankMCQ(false);
+            return;
+        }
 
         // Only fetch if this is a coding question
         if (!isCodingQuestionPage()) return;
@@ -737,11 +750,15 @@ document.addEventListener('keydown', (event) => {
 // Alt+X (Option+X on macOS): Random Key Press Typing Mode (Hacker Typer mode)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyX = event.code === 'KeyX' || 
+                   (event.key && event.key.toLowerCase() === 'x') ||
+                   event.keyCode === 88 || event.which === 88 ||
+                   event.key === '≈';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyX' || (event.key && event.key.toLowerCase() === 'x'))) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyX) {
         event.preventDefault();
         event.stopPropagation();
-        if (isActionThrottled()) return;
+        if (isActionThrottled('alt_x')) return;
 
         if (!isCodingQuestionPage()) return;
 
@@ -752,8 +769,12 @@ document.addEventListener('keydown', (event) => {
 // Alt+C (Option+C on macOS): Toggle AI Chatbot & Stop Typing Mode
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyC = event.code === 'KeyC' || 
+                   (event.key && event.key.toLowerCase() === 'c') ||
+                   event.keyCode === 67 || event.which === 67 ||
+                   event.key === 'ç' || event.key === 'Ç';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyC' || (event.key && event.key.toLowerCase() === 'c'))) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyC) {
         event.preventDefault();
         window.dispatchEvent(new CustomEvent('neoStopTyping'));
         window.dispatchEvent(new CustomEvent('neoToggleChat'));
@@ -763,8 +784,12 @@ document.addEventListener('keydown', (event) => {
 // Alt+Z (Option+Z on macOS): Toggle Toast Visibility (Color Toast ON/OFF)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyZ = event.code === 'KeyZ' || 
+                   (event.key && event.key.toLowerCase() === 'z') ||
+                   event.keyCode === 90 || event.which === 90 ||
+                   event.key === 'Ω';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (event.code === 'KeyZ' || (event.key && event.key.toLowerCase() === 'z'))) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyZ) {
         event.preventDefault();
         event.stopPropagation();
         chrome.runtime.sendMessage({
@@ -791,8 +816,12 @@ window.addEventListener('neoTypingStopped', () => {
 // Add event listener for Alt+O to toggle toast opacity.
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyO = event.code === 'KeyO' || 
+                   (event.key && event.key.toLowerCase() === 'o') ||
+                   event.keyCode === 79 || event.which === 79 ||
+                   event.key === 'ø' || event.key === 'Ø';
     
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && event.code === 'KeyO') {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyO) {
         event.preventDefault();
         chrome.runtime.sendMessage({
             action: 'toggleToastOpacity'
@@ -1898,12 +1927,13 @@ document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyK = event.code === 'KeyK' || 
                    (event.key && event.key.toLowerCase() === 'k') || 
+                   event.keyCode === 75 || event.which === 75 ||
                    event.key === '˚' || event.key === '';
 
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyK) {
         event.preventDefault();
         event.stopPropagation();
-        if (isActionThrottled()) return;
+        if (isActionThrottled('alt_k')) return;
         handleHackerRankMCQ(false);
     }
 }, true); // useCapture: true to intercept before Monaco/HackerRank portal listeners

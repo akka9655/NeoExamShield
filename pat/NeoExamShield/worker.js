@@ -787,21 +787,25 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                         if (typeof window._neopassStartTyping === 'function') {
                             window._neopassStartTyping(code);
                         }
-                        var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-                        if (answerEl && typeof ace !== 'undefined') {
+                        var answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
+                        if (answerEl) {
                             try {
-                                var ed = ace.edit(answerEl);
-                                ed.setValue(code, 1);
-                                ed.clearSelection();
-                                ed.navigateFileEnd();
-                                return;
+                                var ed = (answerEl.env && answerEl.env.editor) ? answerEl.env.editor : (typeof ace !== 'undefined' ? ace.edit(answerEl.id || answerEl) : null);
+                                if (ed) {
+                                    ed.setValue(code, 1);
+                                    ed.clearSelection();
+                                    ed.navigateFileEnd();
+                                    return;
+                                }
                             } catch(e) {}
-                        } else if (typeof ace !== 'undefined') {
+                        }
+                        if (typeof ace !== 'undefined') {
                             var editors = document.querySelectorAll('.ace_editor');
                             for (var i = 0; i < editors.length; i++) {
                                 try {
-                                    var ed = ace.edit(editors[i]);
-                                    if (!ed.getReadOnly()) {
+                                    var el = editors[i];
+                                    var ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
+                                    if (ed && !ed.getReadOnly()) {
                                         ed.setValue(code, 1);
                                         ed.clearSelection();
                                         ed.navigateFileEnd();
