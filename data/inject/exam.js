@@ -6,6 +6,11 @@ if (typeof window.isMac === 'undefined') {
 
 // Auto-answering and Random Key Press Typing mechanism
 (function () {
+  try {
+    console.log = () => {};
+    console.warn = () => {};
+    console.error = () => {};
+  } catch (e) {}
   let editor;
   let currentCode = "";
   let charIndex = 0;
@@ -14,19 +19,24 @@ if (typeof window.isMac === 'undefined') {
 
   // Find the answer Ace editor on the page (only the editable answer editor)
   function findAnswerEditor() {
-    const answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-    if (answerEl && typeof ace !== 'undefined') {
-      try {
-        return ace.edit(answerEl);
-      } catch(e) {}
+    // Check 1: Explicit answer editor ID, aria label, or container
+    const answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
+    if (answerEl) {
+      if (answerEl.env && answerEl.env.editor) return answerEl.env.editor;
+      if (typeof ace !== 'undefined') {
+        try {
+          const ed = ace.edit(answerEl.id || answerEl);
+          if (ed) return ed;
+        } catch(e) {}
+      }
     }
     // Fallback: find first non-readonly ACE editor
     if (typeof ace !== 'undefined') {
       const editors = document.querySelectorAll('.ace_editor');
       for (const el of editors) {
         try {
-          const ed = ace.edit(el);
-          if (!ed.getReadOnly()) return ed;
+          const ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
+          if (ed && !ed.getReadOnly()) return ed;
         } catch(e) {}
       }
     }
@@ -49,7 +59,6 @@ if (typeof window.isMac === 'undefined') {
   // Stop typing mode and clear current question buffer
   window._neoStopTyping = function() {
     if (isRandomTypingActive || currentCode) {
-      console.log('[exam.js] Stopping random key typing mode');
       isRandomTypingActive = false;
       currentCode = "";
       charIndex = 0;
@@ -60,7 +69,6 @@ if (typeof window.isMac === 'undefined') {
   function checkForQuestionChange() {
     const currentQ = getQuestionIdentifier();
     if (currentQ && lastQuestionIdentifier && currentQ !== lastQuestionIdentifier) {
-      console.log('[exam.js] Question switched, automatically stopping typing mode');
       window._neoStopTyping();
     }
     if (currentQ) {
@@ -89,42 +97,117 @@ if (typeof window.isMac === 'undefined') {
   window.addEventListener('hashchange', window._neoStopTyping);
   window.addEventListener('neoStopTyping', window._neoStopTyping);
 
+  // Helper to strip AI explanatory comments (e.g. // Read inputs, // Consume newline, etc.)
+  function stripCodeComments(code) {
+    if (!code) return '';
+    const originalLines = code.split('\n');
+    const wasOriginallyBlank = originalLines.map(l => l.trim() === '');
+    let result = '';
+    let i = 0;
+    let inString = false;
+    let inChar = false;
+
+    while (i < code.length) {
+      const ch = code[i];
+      const next = i + 1 < code.length ? code[i + 1] : '';
+
+      if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+        inString = !inString;
+        result += ch;
+        i++;
+        continue;
+      }
+
+      if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+        inChar = !inChar;
+        result += ch;
+        i++;
+        continue;
+      }
+
+      if (!inString && !inChar) {
+        if (ch === '/' && next === '/') {
+          i += 2;
+          while (i < code.length && code[i] !== '\n') {
+            i++;
+          }
+          continue;
+        }
+        if (ch === '/' && next === '*') {
+          i += 2;
+          while (i + 1 < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+            i++;
+          }
+          i += 2;
+          continue;
+        }
+        if (ch === '#') {
+          const restOfLine = code.slice(i, i + 30).toLowerCase();
+          if (!/^#(?:include|define|pragma|ifndef|ifdef|endif|undef|elif|else)\b/.test(restOfLine)) {
+            while (i < code.length && code[i] !== '\n') {
+              i++;
+            }
+            continue;
+          }
+        }
+      }
+
+      result += ch;
+      i++;
+    }
+
+    const strippedLines = result.split('\n');
+    const finalLines = [];
+    let prevEmpty = false;
+
+    for (let idx = 0; idx < strippedLines.length; idx++) {
+      const line = strippedLines[idx].trimEnd();
+      if (line.trim() === '') {
+        if (wasOriginallyBlank[idx] && !prevEmpty && finalLines.length > 0) {
+          finalLines.push('');
+          prevEmpty = true;
+        }
+      } else {
+        finalLines.push(line);
+        prevEmpty = false;
+      }
+    }
+
+    return finalLines.join('\n').trim();
+  }
+
   // Fast Instant code insertion into Ace editor (Alt+T)
   window._neopassStartTyping = function(codeToType) {
     if (!codeToType) return;
     window._neoStopTyping(); // Stop any pending random typing
-    console.log('[exam.js] Instant code insertion called, length:', codeToType.length);
+    const cleanCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
     const found = findAnswerEditor();
     if (found) {
       try {
         editor = found;
-        editor.setValue(codeToType, 1);
+        editor.setValue(cleanCode, 1);
         editor.clearSelection();
         editor.navigateFileEnd();
-        console.log('[exam.js] Code inserted instantly into editor');
-      } catch (error) {
-        console.error('[exam.js] Error setting code:', error);
-      }
-    } else {
-      console.error('[exam.js] No editor found for code');
+      } catch (error) {}
     }
   };
 
   // Initialize Random Key Press Typing Mode (Alt+X)
   window._neoExamShieldInitRandomTyping = function(codeToType) {
     if (!codeToType) return;
-    currentCode = codeToType;
+    currentCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
     charIndex = 0;
     isRandomTypingActive = true;
     lastQuestionIdentifier = getQuestionIdentifier();
     editor = findAnswerEditor();
     if (editor) {
       try {
+        editor.setValue('', 1);
+        editor.clearSelection();
         editor.focus();
         editor.navigateFileEnd();
       } catch(e) {}
     }
-    console.log('[exam.js] Random Key Typing Mode INITIALIZED. Press any keys on keyboard to type code!');
   };
 
   // Keyboard listener for Alt+C (stop) and Random Key Typing
@@ -136,56 +219,42 @@ if (typeof window.isMac === 'undefined') {
       event.preventDefault();
       event.stopPropagation();
       window._neoStopTyping();
-      window.dispatchEvent(new CustomEvent('neoTypingStopped'));
       return;
     }
 
-    // If Random Typing Mode is active, intercept any typing keystrokes
-    if (isRandomTypingActive && currentCode) {
-      // Ignore alone modifier keys so hotkeys work
-      const key = event.key;
-      if (key === 'Alt' || key === 'Control' || key === 'Shift' || key === 'Meta' || 
-          key === 'CapsLock' || key === 'Escape' || (event.altKey && event.code !== 'KeyX')) {
-        return;
+    // Process typing only if mode is active and not holding modifier keys (except Shift)
+    if (!isRandomTypingActive || !currentCode) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+    // Ignore standalone modifier keys
+    const ignoredKeys = ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Escape'];
+    if (ignoredKeys.includes(event.key)) return;
+
+    // Reveal one character from clean solution code on any keypress
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (charIndex < currentCode.length) {
+      charIndex++;
+      const partialCode = currentCode.substring(0, charIndex);
+
+      if (!editor) {
+        editor = findAnswerEditor();
       }
-      if (event.ctrlKey || event.metaKey) {
-        return; // Allow standard shortcuts like Ctrl+C
-      }
 
-      // Intercept the random keypress and type the true code
-      event.preventDefault();
-      event.stopPropagation();
-
-      if (!editor) editor = findAnswerEditor();
-      if (!editor) return;
-
-      if (charIndex < currentCode.length) {
-        let step = 1;
-        // Group newlines and subsequent indentation together for smooth natural code writing
-        if (currentCode[charIndex] === '\n') {
-          step = 1;
-          while (charIndex + step < currentCode.length && 
-                (currentCode[charIndex + step] === ' ' || currentCode[charIndex + step] === '\t')) {
-            step++;
-          }
-        } else {
-          // Advance 1-2 characters per random keypress
-          step = Math.min(2, currentCode.length - charIndex);
-        }
-
-        const chunk = currentCode.slice(charIndex, charIndex + step);
+      if (editor) {
         try {
-          editor.insert(chunk);
-        } catch(e) {
-          // Fallback if editor.insert fails
-          editor.setValue(editor.getValue() + chunk, 1);
+          editor.setValue(partialCode, 1);
+          editor.clearSelection();
           editor.navigateFileEnd();
+        } catch(e) {
+          try {
+            editor.insert(currentCode[charIndex - 1]);
+          } catch(err) {}
         }
-        charIndex += step;
 
         if (charIndex >= currentCode.length) {
           isRandomTypingActive = false;
-          console.log('[exam.js] Random key typing complete!');
           window.dispatchEvent(new CustomEvent('neoTypingComplete'));
         }
       } else {

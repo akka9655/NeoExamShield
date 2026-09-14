@@ -9,24 +9,29 @@ const shortcutStates = {
 // Request blocking mechanism to prevent multiple simultaneous API requests
 let isRequestInProgress = false;
 let requestTimeout = null;
+let lastRequestTimestamp = 0;
 
 function canMakeRequest() {
+    // If more than 4 seconds have elapsed since last request, auto-unblock
+    if (isRequestInProgress && (Date.now() - lastRequestTimestamp > 4000)) {
+        isRequestInProgress = false;
+    }
     return !isRequestInProgress;
 }
 
 function blockRequests() {
     isRequestInProgress = true;
+    lastRequestTimestamp = Date.now();
     
     // Clear any existing timeout
     if (requestTimeout) {
         clearTimeout(requestTimeout);
     }
     
-    // Set timeout to unblock after 15 seconds
+    // Set timeout to unblock after 6 seconds
     requestTimeout = setTimeout(() => {
         isRequestInProgress = false;
-        console.log('[Request Block] Unblocked after 15 seconds timeout');
-    }, 15000);
+    }, 6000);
 }
 
 function unblockRequests() {
@@ -599,7 +604,89 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
     }
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = []) {
+// Helper to strip AI explanatory comments (e.g. // Read inputs, // Consume newline, etc.)
+function stripCodeComments(code) {
+    if (!code) return '';
+    const originalLines = code.split('\n');
+    const wasOriginallyBlank = originalLines.map(l => l.trim() === '');
+    let result = '';
+    let i = 0;
+    let inString = false;
+    let inChar = false;
+
+    while (i < code.length) {
+        const ch = code[i];
+        const next = i + 1 < code.length ? code[i + 1] : '';
+
+        if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+            inString = !inString;
+            result += ch;
+            i++;
+            continue;
+        }
+
+        if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+            inChar = !inChar;
+            result += ch;
+            i++;
+            continue;
+        }
+
+        if (!inString && !inChar) {
+            // C/C++/Java single line comments: //
+            if (ch === '/' && next === '/') {
+                i += 2;
+                while (i < code.length && code[i] !== '\n') {
+                    i++;
+                }
+                continue;
+            }
+            // Multi-line comments: /* ... */
+            if (ch === '/' && next === '*') {
+                i += 2;
+                while (i + 1 < code.length && !(code[i] === '*' && code[i + 1] === '/')) {
+                    i++;
+                }
+                i += 2;
+                continue;
+            }
+            // Python/Shell comments: # (preserve C/C++ preprocessor like #include, #define)
+            if (ch === '#') {
+                const restOfLine = code.slice(i, i + 30).toLowerCase();
+                if (!/^#(?:include|define|pragma|ifndef|ifdef|endif|undef|elif|else)\b/.test(restOfLine)) {
+                    while (i < code.length && code[i] !== '\n') {
+                        i++;
+                    }
+                    continue;
+                }
+            }
+        }
+
+        result += ch;
+        i++;
+    }
+
+    const strippedLines = result.split('\n');
+    const finalLines = [];
+    let prevEmpty = false;
+
+    for (let idx = 0; idx < strippedLines.length; idx++) {
+        const line = strippedLines[idx].trimEnd();
+        if (line.trim() === '') {
+            if (wasOriginallyBlank[idx] && !prevEmpty && finalLines.length > 0) {
+                finalLines.push('');
+                prevEmpty = true;
+            }
+        } else {
+            finalLines.push(line);
+            prevEmpty = false;
+        }
+    }
+
+    return finalLines.join('\n').trim();
+}
+
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true) {
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
         if (isMCQ) {
@@ -608,44 +695,59 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 response: response,
                 rawOptions: rawOptions,
                 isHackerRank: isHackerRank,
-                isMultipleChoice: isMultipleChoice
+                isMultipleChoice: isMultipleChoice,
+                autoClick: Boolean(autoClick)
             });
 
-            // MAIN world backup click for rock-solid DOM trigger
-            chrome.scripting.executeScript({
-                target: { tabId: tabId },
-                func: function(respText) {
-                    try {
-                        const clean = (respText || '').trim();
-                        const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
-                                         clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
-                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
-                                         clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
-                        if (!optMatch) return;
-                        const val = optMatch[1].toUpperCase();
-                        const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
-                        if (idx < 0) return;
+            // MAIN world backup click for rock-solid DOM trigger (only if auto-clicking)
+            if (autoClick) {
+                removeExistingToast(tabId);
+                chrome.scripting.executeScript({
+                    target: { tabId: tabId },
+                    func: function(respText) {
+                        try {
+                            const clean = (respText || '').trim();
+                            const optMatch = clean.match(/(?:Option|Choice)\s*[:\-\*]*\s*([1-9]|[A-D])\b/i) ||
+                                             clean.match(/(?:Answer|Correct|Ans)\s*(?:is\s*)?(?:Option\s*)?[:\-\*\s]*([1-9]|[A-D])\b/i) ||
+                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\.\:\)\s]/i) ||
+                                             clean.match(/^[\s\*#\-]*([1-9]|[A-D])[\s\*]*$/i);
+                            if (!optMatch) return;
+                            const val = optMatch[1].toUpperCase();
+                            const idx = isNaN(val) ? (val.charCodeAt(0) - 65) : (parseInt(val, 10) - 1);
+                            if (idx < 0) return;
 
-                        let el = document.querySelector('#tt-option-' + idx) ||
-                                 document.querySelector('#tt-option-' + (idx + 1));
-                        if (!el) {
-                            const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
-                            if (all && all.length > idx) el = all[idx];
-                        }
-                        if (el) {
-                            const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
-                            const chk = el.querySelector('span.checkmark1, .checkmark, label');
-                            (chk || inp || el).click();
-                            if (inp) {
-                                inp.checked = true;
-                                inp.dispatchEvent(new Event('change', { bubbles: true }));
+                            let el = document.querySelector('#tt-option-' + idx) ||
+                                     document.querySelector('#tt-option-' + (idx + 1));
+                            if (!el) {
+                                const all = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+                                if (all && all.length > idx) el = all[idx];
                             }
-                        }
-                    } catch(e) {}
-                },
-                args: [response],
-                world: 'MAIN'
-            }).catch(() => {});
+                            if (el) {
+                                const inp = el.querySelector('input[type="radio"], input[type="checkbox"]');
+                                const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
+                                const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
+                                if (chk) {
+                                    chk.click();
+                                } else if (lbl) {
+                                    lbl.click();
+                                } else if (inp) {
+                                    inp.click();
+                                } else {
+                                    el.click();
+                                }
+
+                                if (inp && !inp.checked) {
+                                    inp.checked = true;
+                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                    inp.dispatchEvent(new Event('change', { bubbles: true }));
+                                }
+                            }
+                        } catch(e) {}
+                    },
+                    args: [response],
+                    world: 'MAIN'
+                }).catch(() => {});
+            }
         } else {
             // Clean code block markers and any intro/outro markdown to get 100% pure code
             let cleanedCode = response.trim();
@@ -655,6 +757,9 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
             } else {
                 cleanedCode = cleanedCode.replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
             }
+            cleanedCode = cleanedCode.replace(/\r\n/g, '\n').trim();
+            // Strip AI comments (e.g. // Read inputs, // Consume newline, etc.)
+            cleanedCode = stripCodeComments(cleanedCode);
 
             // Copy to clipboard as fallback
             copyToClipboard(cleanedCode);
@@ -675,33 +780,58 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 });
                 showToast(tabId, 'Typing Mode Ready: Type any keys to write code');
             } else {
-                // Alt+T: Fast Instant direct code insertion into Ace editor
+                // Alt+T: Fast Instant direct code insertion into Ace / Monaco / textarea editor
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
                     func: function(code) {
                         if (typeof window._neopassStartTyping === 'function') {
                             window._neopassStartTyping(code);
                         }
-                        var answerEl = document.querySelector('[aria-labelledby="editor-answer"]');
-                        if (answerEl && typeof ace !== 'undefined') {
+                        var answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
+                        if (answerEl) {
                             try {
-                                var ed = ace.edit(answerEl);
-                                ed.setValue(code, 1);
-                                ed.clearSelection();
-                                ed.navigateFileEnd();
+                                var ed = (answerEl.env && answerEl.env.editor) ? answerEl.env.editor : (typeof ace !== 'undefined' ? ace.edit(answerEl.id || answerEl) : null);
+                                if (ed) {
+                                    ed.setValue(code, 1);
+                                    ed.clearSelection();
+                                    ed.navigateFileEnd();
+                                    return;
+                                }
                             } catch(e) {}
-                        } else if (typeof ace !== 'undefined') {
+                        }
+                        if (typeof ace !== 'undefined') {
                             var editors = document.querySelectorAll('.ace_editor');
-                            editors.forEach(function(el) {
+                            for (var i = 0; i < editors.length; i++) {
                                 try {
-                                    var ed = ace.edit(el);
-                                    if (!ed.getReadOnly()) {
+                                    var el = editors[i];
+                                    var ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
+                                    if (ed && !ed.getReadOnly()) {
                                         ed.setValue(code, 1);
                                         ed.clearSelection();
                                         ed.navigateFileEnd();
+                                        return;
                                     }
                                 } catch(e) {}
-                            });
+                            }
+                        }
+                        // Monaco Editor Support
+                        if (window.monaco && window.monaco.editor) {
+                            try {
+                                var models = window.monaco.editor.getModels();
+                                if (models && models.length > 0) {
+                                    models[0].setValue(code);
+                                    return;
+                                }
+                            } catch(e) {}
+                        }
+                        // Standard textarea / input fallback
+                        var txtArea = document.querySelector('textarea.ace_text-input') || document.querySelector('textarea, .input-area');
+                        if (txtArea) {
+                            try {
+                                txtArea.value = code;
+                                txtArea.dispatchEvent(new Event('input', { bubbles: true }));
+                                txtArea.dispatchEvent(new Event('change', { bubbles: true }));
+                            } catch(e) {}
                         }
                     },
                     args: [cleanedCode],
@@ -711,9 +841,6 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 });
                 showToast(tabId, 'Code Solution Inserted');
             }
-
-            // Clean up spinner toast
-            removeExistingToast(tabId);
         }
     } else if (response && response.error) {
         // Error case - response contains error information
@@ -755,32 +882,49 @@ let preferredKey = null; // currently active, fast-responding key
 function getPrioritizedConfigs(configs) {
     if (!configs || configs.length <= 1) return configs;
     const now = Date.now();
-    const ready = [];
-    const cooling = [];
+    const readyCustom = [];
+    const readyDefault = [];
+    const coolingCustom = [];
+    const coolingDefault = [];
 
     for (const cfg of configs) {
         const until = keyCooldowns.get(cfg.apiKey) || 0;
-        if (now >= until) {
-            ready.push(cfg);
+        const isReady = now >= until;
+        if (cfg.isCustom) {
+            if (isReady) readyCustom.push(cfg);
+            else coolingCustom.push({ cfg, until });
         } else {
-            cooling.push({ cfg, until });
+            if (isReady) readyDefault.push(cfg);
+            else coolingDefault.push({ cfg, until });
         }
     }
 
     // Sort cooling keys by shortest remaining wait time
-    cooling.sort((a, b) => a.until - b.until);
-    const sortedCooling = cooling.map(c => c.cfg);
+    coolingCustom.sort((a, b) => a.until - b.until);
+    coolingDefault.sort((a, b) => a.until - b.until);
 
-    // Prioritize the preferred working key first among ready keys
+    // Prioritize preferred working key among ready keys
     if (preferredKey) {
-        const prefIdx = ready.findIndex(c => c.apiKey === preferredKey);
-        if (prefIdx > 0) {
-            const [pk] = ready.splice(prefIdx, 1);
-            ready.unshift(pk);
+        const customIdx = readyCustom.findIndex(c => c.apiKey === preferredKey);
+        if (customIdx > 0) {
+            const [pk] = readyCustom.splice(customIdx, 1);
+            readyCustom.unshift(pk);
+        } else {
+            const defIdx = readyDefault.findIndex(c => c.apiKey === preferredKey);
+            if (defIdx > 0) {
+                const [pk] = readyDefault.splice(defIdx, 1);
+                readyDefault.unshift(pk);
+            }
         }
     }
 
-    return [...ready, ...sortedCooling];
+    // Hierarchy: 1) User custom ready keys, 2) Default ready keys, 3) User cooling keys, 4) Default cooling keys
+    return [
+        ...readyCustom,
+        ...readyDefault,
+        ...coolingCustom.map(c => c.cfg),
+        ...coolingDefault.map(c => c.cfg)
+    ];
 }
 
 // Enhanced queryRequest function with comprehensive error handling
@@ -818,14 +962,14 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
                     return result; // Success
                 }
                 
-                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 45s (free tier 15 RPM)
+                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 30s (free tier rolling window)
                 const isRateLimit = result && (
                     result.status === 429 || 
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('quota')) ||
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('resource_exhausted'))
                 );
                 if (isRateLimit) {
-                    keyCooldowns.set(config.apiKey, Date.now() + 45000);
+                    keyCooldowns.set(config.apiKey, Date.now() + 30000);
                 } else if (result && result.status === 400) {
                     const errStr = ((result.detailedInfo || '') + ' ' + (result.error || '')).toLowerCase();
                     if (errStr.includes('api_key_invalid') || errStr.includes('key not valid') || errStr.includes('invalid api key')) {
@@ -1017,7 +1161,7 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
     }
 }// Helper function to get custom API configuration
 
-// Function to retrieve custom AI API configs in priority order
+// Function to retrieve custom AI API configs in priority order with auto-fallback pool
 async function getCustomAPIConfigs() {
     return new Promise((resolve) => {
         chrome.storage.local.get([
@@ -1025,8 +1169,12 @@ async function getCustomAPIConfigs() {
             'aiProvider',
             'customEndpoint',
             'customAPIKey',
-            'customModelName'
+            'customModelName',
+            'linkedCode'
         ], (result) => {
+            const userConfigs = [];
+
+            // 1. User custom code keys (from setup page / 3-digit link)
             if (result.apiConfigs && Array.isArray(result.apiConfigs) && result.apiConfigs.length > 0) {
                 const validConfigs = result.apiConfigs
                     .filter(c => c && c.apiKey && String(c.apiKey).trim().length > 0)
@@ -1034,36 +1182,49 @@ async function getCustomAPIConfigs() {
                         aiProvider: c.aiProvider || 'google',
                         customEndpoint: c.customEndpoint || '',
                         apiKey: String(c.apiKey).trim(),
-                        modelName: c.modelName || ''
+                        modelName: c.modelName || 'gemini-3.6-flash',
+                        isCustom: true
                     }));
-                
-                if (validConfigs.length > 0) {
-                    return resolve(validConfigs);
-                }
+                userConfigs.push(...validConfigs);
             }
 
+            // 2. Legacy / direct custom API key from settings
             if (result.customAPIKey && String(result.customAPIKey).trim().length > 0) {
-                return resolve([{
+                userConfigs.push({
                     aiProvider: result.aiProvider || 'google',
                     customEndpoint: result.customEndpoint || '',
                     apiKey: String(result.customAPIKey).trim(),
-                    modelName: result.customModelName || ''
-                }]);
+                    modelName: result.customModelName || 'gemini-3.6-flash',
+                    isCustom: true
+                });
             }
 
-            // Fallback default API key pool (works out-of-the-box for free tier)
+            // 3. Built-in high-availability API key pool (automatic fallback for free-tier users)
             const defaultKeys = [
                 "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
                 "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
                 "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
                 "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
             ];
-            resolve(defaultKeys.map(key => ({
+            const defaultPool = defaultKeys.map(key => ({
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.5-flash'
-            })));
+                modelName: 'gemini-3.6-flash',
+                isCustom: false
+            }));
+
+            // User custom keys ALWAYS take top priority. Default pool serves as seamless auto-fallback
+            const seen = new Set();
+            const combined = [];
+            for (const cfg of [...userConfigs, ...defaultPool]) {
+                if (!seen.has(cfg.apiKey)) {
+                    seen.add(cfg.apiKey);
+                    combined.push(cfg);
+                }
+            }
+
+            resolve(combined);
         });
     });
 }
@@ -1120,9 +1281,18 @@ async function resolveImageToBase64(imgUrlOrData) {
 
 // Optimized Gemini caller with multi-model fallback & immediate 429 rotation
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
-    const defaultModel = 'gemini-3.5-flash';
+    const defaultModel = 'gemini-3.6-flash';
     const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
-    const fallbackModels = [primary, 'gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-flash-latest'];
+    const fallbackModels = [
+        primary, 
+        'gemini-3.6-flash', 
+        'gemini-2.5-flash', 
+        'gemini-2.0-flash', 
+        'gemini-1.5-flash', 
+        'gemini-flash-latest', 
+        'gemini-3.1-flash-lite', 
+        'gemini-flash-lite-latest'
+    ];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
@@ -1143,7 +1313,7 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 300 : 4096
+            maxOutputTokens: isMCQ ? 800 : 4096
         };
 
         const requestBody = {
@@ -1173,14 +1343,16 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
                 const errData = await response.json().catch(() => ({}));
                 const errMsg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
                 
-                // If rate limit (429) or quota exhausted, immediately break and return error so key rotation takes over
+                // If rate limit (429) or quota exhausted, switch to next model immediately (free tier quotas are per-model)
                 if (response.status === 429 || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
-                    return {
+                    lastError = {
                         error: `Gemini rate limit exceeded: ${response.status}`,
                         errorType: 'api',
                         status: 429,
                         detailedInfo: errMsg
                     };
+                    console.warn(`[Gemini Free Tier Auto-Fallback] Model ${currentModel} reached quota/rate limit (429). Instantly switching to next model on this key...`);
+                    continue; // Try next fallback model on same key!
                 }
 
                 // If invalid key (400), break immediately
@@ -1499,7 +1671,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         queryText = `You are solving a HackerRank coding problem. Provide ONLY the complete solution code that can be directly run.
 
 IMPORTANT REQUIREMENTS:
-- Provide ONLY the solution code, no explanations or comments
+- Provide ONLY the solution code, absolutely NO explanations or comments (no //, no #, no /* */ comments like "// Read inputs" or "// Consume newline")
 - The code must be complete and ready to run
 - Include all necessary imports and function definitions
 - Handle input/output exactly as specified
@@ -1512,8 +1684,12 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         // Original prompt for other platforms
                         queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
                             Ensure the code: Meets the requirements outlined in the problem statement.
-                            Stricly Passes all test cases, including edge cases and boundary conditions.
-                            Always get the input from the users.` +
+                            Strictly passes all test cases, including edge cases and boundary conditions.
+                            Always read the input from standard input as specified.
+                            CRITICAL LANGUAGE RULES:
+                            - If the language is C or C++, include all required headers (<stdio.h>, <stdlib.h>, <string.h>, <math.h>). Ensure format specifiers match variable types precisely. Handle newline/whitespace before strings or characters properly. Always end with return 0;.
+                            - CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.
+                            - Output ONLY the complete executable code inside markdown code fences. Absolutely no text before or after.` +
                             `Question:\n${request.question}\n\n` +
                             (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}\n\n` : '') +
                             (request.constraints ? `Constraints:\n${request.constraints}\n\n` : '') +
@@ -1538,8 +1714,10 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     length: queryText.length
                 });
 
-                // Show spinner toast immediately so the user has visual feedback
-                showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
+                // Show spinner toast immediately so the user has visual feedback (only if not silent auto-click)
+                if (!request.autoClick) {
+                    showSpinnerToast(sender.tab.id, request.isMCQ ? 'Solving MCQ...' : 'Generating code solution...');
+                }
 
                 // Send query and handle response
                 const reqImages = request.images || (request.image ? [request.image] : null);
@@ -1556,7 +1734,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         responseLength: response.length
                     });
                     
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick);
                     sendResponse({
                         success: true,
                         response,
@@ -1564,7 +1742,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     });
                 } else if (response && response.error) {
                     // Error case - handle the error through the response handler
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick);
                     sendResponse({
                         error: response.error,
                         status: 'error',
@@ -1573,7 +1751,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                 } else {
                     // Fallback case
                     console.error('No response received from AI service');
-                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions);
+                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick);
                     sendResponse({
                         error: 'No response from query service',
                         status: 'error',
@@ -1583,6 +1761,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
 
             } catch (error) {
                 console.error("Query processing error:", error);
+                unblockRequests();
                 
                 removeExistingToast(sender.tab.id);
                 // Show a generic error toast only if the error wasn't already handled by queryRequest
@@ -1606,17 +1785,21 @@ async function handleChatMessage(message, sender) {
         
         if (customAPIConfigs.length > 0) {
             let lastResult = null;
+            const chatPrompt = (message.context ? `Context:\n${message.context}\n\n` : '') + (message.message || '');
             for (const config of customAPIConfigs) {
-                const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config);
+                const result = await queryCustomAPI(chatPrompt, false, false, config, message.image);
                 if (typeof result === 'string') {
                     unblockRequests();
-                    return result; // Success
+                    sendChatResponse(sender.tab.id, result);
+                    return; // Success
                 }
                 console.warn("API Key failed, falling back to next...", result);
                 lastResult = result;
             }
             unblockRequests();
-            return lastResult; // Return the last error if all failed
+            const errMsg = (lastResult && lastResult.error) ? lastResult.error : "Failed to get AI response. Please check your API key.";
+            sendChatErrorResponse(sender.tab.id, errMsg);
+            return;
         }
         
         // Check if user is logged in
@@ -1995,9 +2178,13 @@ async function getToastOpacity() {
 }
 
 // Show a toast with the current opacity level
-function showOpacityLevelToast(tabId, message) {
+async function showOpacityLevelToast(tabId, message, forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     // Remove any existing toast first
-    removeExistingToast(tabId);
+    await removeExistingToast(tabId);
     
     chrome.scripting.executeScript({
         target: {
@@ -2059,11 +2246,11 @@ function showOpacityLevelToast(tabId, message) {
     });
 }
 
-// Helper to check if toasts are globally enabled (toggled via Alt+Z)
+// Helper to check if toasts are globally enabled (toggled via Alt+Z, default OFF)
 async function areToastsEnabled() {
     return new Promise((resolve) => {
         chrome.storage.local.get(['toastsEnabled'], (result) => {
-            resolve(result.toastsEnabled !== false); // default true
+            resolve(result.toastsEnabled === true); // default false (toasts OFF by default)
         });
     });
 }
@@ -2165,7 +2352,11 @@ async function showToast(tabId, message, isError = false, detailedInfo = '', for
 }
 
 // Show stealth mode toast notification in Neo PAT portal theme
-async function showStealthToast(tabId, message, stealthEnabled) {
+async function showStealthToast(tabId, message, stealthEnabled, forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
@@ -2284,7 +2475,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const enabled = await areToastsEnabled();
             const newState = !enabled;
             await chrome.storage.local.set({ toastsEnabled: newState });
-            showToast(sender.tab.id, newState ? 'Toasts: ON' : 'Toasts: OFF (Silent)', false, '', true);
+            if (!newState) {
+                await removeExistingToast(sender.tab.id);
+            }
+            showToast(sender.tab.id, newState ? 'Toasts: ON (Color Mode)' : 'Toasts: OFF (Ghost Mode)', false, '', true);
             sendResponse({ success: true, enabled: newState });
         })();
         return true;
@@ -2297,11 +2491,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
-// Initialize opacity level from storage on startup
+// Initialize toast settings from storage on startup
 chrome.runtime.onStartup.addListener(() => {
-    chrome.storage.local.get(['toastOpacityLevel'], (result) => {
+    chrome.storage.local.get(['toastOpacityLevel', 'toastsEnabled'], (result) => {
         if (result.toastOpacityLevel) {
             currentOpacityLevel = result.toastOpacityLevel;
+        }
+        if (result.toastsEnabled === undefined) {
+            chrome.storage.local.set({ toastsEnabled: false });
         }
     });
 });
@@ -2810,7 +3007,11 @@ async function showMCQToast(tabId, message, detailedInfo = '', forceShow = false
 }
 
 // Update showNPTELToast to use Neo PAT portal theme
-async function showNPTELToast(tabId, message, isError = false, detailedInfo = '') {
+async function showNPTELToast(tabId, message, isError = false, detailedInfo = '', forceShow = false) {
+    if (!forceShow && !(await areToastsEnabled())) {
+        await removeExistingToast(tabId);
+        return;
+    }
     const opacity = await getToastOpacity();
     await removeExistingToast(tabId);
 
