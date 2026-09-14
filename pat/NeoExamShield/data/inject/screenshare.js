@@ -9,14 +9,29 @@ if (typeof isMac === 'undefined') {
 const windowEvents = [
     "blur", 
     "focus", 
+    "focusout", 
     "pagehide", 
-    'lostpointercapture', 
-    "visibilitychange"
+    "lostpointercapture", 
+    "visibilitychange", 
+    "webkitvisibilitychange", 
+    "fullscreenchange", 
+    "webkitfullscreenchange", 
+    "mouseleave", 
+    "mouseout"
 ];
 
 const documentEvents = [
+    "blur", 
+    "focus", 
+    "focusout", 
+    "pagehide", 
+    "lostpointercapture", 
     "visibilitychange", 
-    "webkitvisibilitychange"
+    "webkitvisibilitychange", 
+    "fullscreenchange", 
+    "webkitfullscreenchange", 
+    "mouseleave", 
+    "mouseout"
 ];
 
 // Store original property descriptors for restoration
@@ -30,14 +45,29 @@ try {
 // Event handler to prevent default tracking behavior safely
 const eventHandler = (event) => {
     try {
-        // Never prevent focus/blur on actual form inputs, buttons, or code editor, nor pagehide
-        if (event.type === 'blur' || event.type === 'focus' || event.type === 'pagehide') {
-            if (event.target !== window && event.target !== document) {
-                return;
+        const isFocusOrMouse = (
+            event.type === 'blur' || 
+            event.type === 'focus' || 
+            event.type === 'focusout' || 
+            event.type === 'pagehide' || 
+            event.type === 'mouseleave' || 
+            event.type === 'mouseout'
+        );
+
+        if (isFocusOrMouse) {
+            const isRootTarget = (
+                event.target === window || 
+                event.target === document || 
+                event.target === document.documentElement || 
+                event.target === document.body
+            );
+            if (!isRootTarget) {
+                return; // Let form inputs, dropdowns, code editor work normally!
             }
         } else {
             event.preventDefault();
         }
+
         event.stopPropagation();
         event.stopImmediatePropagation();
     } catch (e) {}
@@ -45,28 +75,32 @@ const eventHandler = (event) => {
 
 // Main function to bypass browser restrictions
 function bypassRestrictions() {
-    // Note: We intentionally do NOT add any beforeunload listener here.
-    // In Chromium/modern browsers, calling preventDefault() or setting returnValue on beforeunload
-    // is what triggers the "Leave site? Changes you made may not be saved." prompt.
-    // By dropping beforeunload in safeAddEventListener below and neutralizing window.onbeforeunload,
-    // we ensure the browser never prompts the user when navigating or closing tabs.
-    
-    // Override addEventListener to block beforeunload and unload handlers safely
+    // Override addEventListener to block tracking and beforeunload handlers safely
     try {
         const originalAddEventListener = EventTarget.prototype.addEventListener;
         if (originalAddEventListener) {
             const safeAddEventListener = function(type, listener) {
-                // Completely drop unload and beforeunload listeners to prevent permissions policy violations
+                // Drop unload and beforeunload listeners to prevent page prompts
                 if (type === 'unload' || type === 'beforeunload') {
                     return;
                 }
+                // Drop visibility and fullscreen tracking listeners
+                if (type === 'visibilitychange' || type === 'webkitvisibilitychange' ||
+                    type === 'fullscreenchange' || type === 'webkitfullscreenchange') {
+                    return;
+                }
+                // Drop window/document level blur, focusout, and mouseleave listeners
+                const isRootTarget = (this === window || this === document || (typeof document !== 'undefined' && (this === document.documentElement || this === document.body)));
+                if (isRootTarget && (type === 'blur' || type === 'focusout' || type === 'mouseleave' || type === 'mouseout' || type === 'pagehide')) {
+                    return;
+                }
+
                 try {
                     return originalAddEventListener.apply(this || window, arguments);
                 } catch (e) {
                     try {
                         return originalAddEventListener.call(this || window, type, listener, arguments[2]);
                     } catch (err) {
-                        // Suppress error to avoid throwing from wrapper and leaking into stack traces
                         return;
                     }
                 }
@@ -81,7 +115,6 @@ function bypassRestrictions() {
                 });
             } catch (e) {}
 
-            // Set name and length to match native EventTarget.prototype.addEventListener
             try {
                 Object.defineProperty(safeAddEventListener, 'name', {
                     value: 'addEventListener',
@@ -89,7 +122,6 @@ function bypassRestrictions() {
                 });
             } catch (e) {}
 
-            // Copy all properties and symbols from originalAddEventListener (Zone.js symbols, etc.)
             try {
                 const descriptors = Object.getOwnPropertyDescriptors(originalAddEventListener);
                 for (const key of Object.keys(descriptors)) {
@@ -115,14 +147,9 @@ function bypassRestrictions() {
     try {
         let _onbeforeunload = null;
         Object.defineProperty(window, 'onbeforeunload', {
-            get: function() {
-                return null;
-            },
-            set: function(val) {
-                // Silently accept without error
-                _onbeforeunload = val;
-            },
-            configurable: true, // CRITICAL: must remain configurable so Zone.js can redefine/wrap it!
+            get: function() { return null; },
+            set: function(val) { _onbeforeunload = val; },
+            configurable: true,
             enumerable: true
         });
     } catch (e) {}
@@ -130,16 +157,45 @@ function bypassRestrictions() {
     try {
         let _onunload = null;
         Object.defineProperty(window, 'onunload', {
-            get: function() {
-                return null;
-            },
-            set: function(val) {
-                _onunload = val;
-            },
+            get: function() { return null; },
+            set: function(val) { _onunload = val; },
             configurable: true,
             enumerable: true
         });
     } catch (e) {}
+
+    // Override blur, focusout, pagehide, visibilitychange on window / document
+    ['onblur', 'onpagehide', 'onfocusout'].forEach(prop => {
+        try {
+            let _h = null;
+            Object.defineProperty(window, prop, {
+                get: () => null,
+                set: (val) => { _h = val; },
+                configurable: true,
+                enumerable: true
+            });
+            if (typeof HTMLBodyElement !== 'undefined' && HTMLBodyElement.prototype) {
+                Object.defineProperty(HTMLBodyElement.prototype, prop, {
+                    get: () => null,
+                    set: (val) => {},
+                    configurable: true,
+                    enumerable: true
+                });
+            }
+        } catch (e) {}
+    });
+
+    ['onvisibilitychange', 'onwebkitvisibilitychange', 'onfullscreenchange', 'onwebkitfullscreenchange'].forEach(prop => {
+        try {
+            let _h = null;
+            Object.defineProperty(document, prop, {
+                get: () => null,
+                set: (val) => { _h = val; },
+                configurable: true,
+                enumerable: true
+            });
+        } catch (e) {}
+    });
 
     try {
         if (typeof HTMLBodyElement !== 'undefined' && HTMLBodyElement.prototype) {
@@ -172,26 +228,150 @@ function bypassRestrictions() {
         } catch (e) {}
     });
 
-    // Override visibility state properties safely
+    // Override hasFocus to always return true (bulletproof against document.hasFocus polling)
     try {
-        Object.defineProperty(document, "visibilityState", {
-            get: () => "visible",
-            configurable: true
+        const fakeHasFocus = function hasFocus() {
+            return true;
+        };
+        try {
+            Object.defineProperty(fakeHasFocus, 'toString', {
+                value: function toString() { return 'function hasFocus() { [native code] }'; },
+                writable: true,
+                configurable: true
+            });
+            Object.defineProperty(fakeHasFocus, 'name', {
+                value: 'hasFocus',
+                configurable: true
+            });
+        } catch (e) {}
+
+        if (typeof Document !== 'undefined' && Document.prototype) {
+            Document.prototype.hasFocus = fakeHasFocus;
+        }
+        if (typeof document !== 'undefined') {
+            document.hasFocus = fakeHasFocus;
+        }
+    } catch (e) {}
+
+    // Override visibility state properties safely on prototype and instance
+    try {
+        const docProto = (typeof Document !== 'undefined' && Document.prototype) ? Document.prototype : document;
+
+        ['visibilityState', 'webkitVisibilityState'].forEach(prop => {
+            try {
+                Object.defineProperty(docProto, prop, {
+                    get: () => 'visible',
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+            try {
+                Object.defineProperty(document, prop, {
+                    get: () => 'visible',
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+        });
+
+        ['hidden', 'webkitHidden'].forEach(prop => {
+            try {
+                Object.defineProperty(docProto, prop, {
+                    get: () => false,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+            try {
+                Object.defineProperty(document, prop, {
+                    get: () => false,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
         });
     } catch (e) {}
 
+    // Fullscreen persistence & spoofing
+    let lastFullscreenElement = null;
     try {
-        Object.defineProperty(document, 'webkitVisibilityState', {
-            get: () => "visible",
-            configurable: true
+        const origReqFS = Element.prototype.requestFullscreen || Element.prototype.webkitRequestFullscreen;
+        if (origReqFS) {
+            Element.prototype.requestFullscreen = async function() {
+                lastFullscreenElement = this;
+                try {
+                    return await origReqFS.apply(this, arguments);
+                } catch(e) {
+                    return Promise.resolve();
+                }
+            };
+            if (Element.prototype.webkitRequestFullscreen) {
+                Element.prototype.webkitRequestFullscreen = Element.prototype.requestFullscreen;
+            }
+        }
+
+        const docProto = (typeof Document !== 'undefined' && Document.prototype) ? Document.prototype : document;
+        ['fullscreenElement', 'webkitFullscreenElement'].forEach(prop => {
+            try {
+                const desc = Object.getOwnPropertyDescriptor(docProto, prop);
+                Object.defineProperty(docProto, prop, {
+                    get: () => lastFullscreenElement || (desc && desc.get ? desc.get.call(document) : null),
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch(e) {}
+            try {
+                Object.defineProperty(document, prop, {
+                    get: () => lastFullscreenElement || null,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch(e) {}
         });
     } catch (e) {}
 
+    // Neutralize Examly proctoring audio alarm (e.g. active-tab-audio / race2.ogg)
     try {
-        Object.defineProperty(document, "hidden", {
-            get: () => false,
-            configurable: true
-        });
+        if (typeof HTMLAudioElement !== 'undefined' && HTMLAudioElement.prototype) {
+            const origPlay = HTMLAudioElement.prototype.play;
+            HTMLAudioElement.prototype.play = function() {
+                if (this.id === 'active-tab-audio' || (this.src && this.src.includes('race2.ogg'))) {
+                    return Promise.resolve();
+                }
+                return origPlay.apply(this, arguments);
+            };
+        }
+    } catch (e) {}
+
+    // requestAnimationFrame fallback to keep animation loops alive in background tabs
+    try {
+        const origRAF = window.requestAnimationFrame;
+        if (origRAF) {
+            window.requestAnimationFrame = function(callback) {
+                let fired = false;
+                const timerId = setTimeout(() => {
+                    if (!fired) {
+                        fired = true;
+                        try { callback(performance.now()); } catch(e) {}
+                    }
+                }, 50);
+
+                return origRAF.call(window, (time) => {
+                    if (!fired) {
+                        fired = true;
+                        clearTimeout(timerId);
+                        try { callback(time); } catch(e) {}
+                    }
+                });
+            };
+            try {
+                Object.defineProperty(window.requestAnimationFrame, 'toString', {
+                    value: () => 'function requestAnimationFrame() { [native code] }',
+                    writable: true,
+                    configurable: true
+                });
+            } catch (e) {}
+        }
     } catch (e) {}
 }
 
