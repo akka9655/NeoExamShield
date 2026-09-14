@@ -1247,8 +1247,13 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 800 : 4096
+            maxOutputTokens: isMCQ ? 150 : 4096
         };
+
+        // Disable thinking budget on newer Gemini models (2.0/2.5/3.x) for instant < 500ms responses
+        if (currentModel.includes('3.') || currentModel.includes('2.5') || currentModel.includes('2.0') || currentModel.includes('thinking')) {
+            generationConfig.thinkingConfig = { thinkingBudget: 0 };
+        }
 
         const requestBody = {
             contents: [{ parts: googleParts }],
@@ -1256,15 +1261,26 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
         };
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6500);
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s fast switching timeout
 
         try {
-            const response = await fetch(apiUrl, {
+            let response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody),
                 signal: controller.signal
             });
+
+            // If thinkingConfig is rejected with 400 on an older model, retry immediately without it
+            if (!response.ok && response.status === 400 && generationConfig.thinkingConfig) {
+                delete generationConfig.thinkingConfig;
+                response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody),
+                    signal: controller.signal
+                });
+            }
             clearTimeout(timeoutId);
 
             if (response.ok) {
