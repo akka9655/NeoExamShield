@@ -18,6 +18,9 @@
         "metadata.json",
         "contentScript.js",
         "manifest.json",
+        "minifiedBackground.js",
+        "minifiedContent-script.js",
+        "rules.json",
         "data/inject/mock_code/mock_manifest.json",
         "data/inject/mock_code/minifiedBackground.js",
         "data/inject/mock_code/minifiedContent-script.js",
@@ -61,6 +64,7 @@
         "https://*/*",
         "http://*/*"
       ],
+      "run_at": "document_start",
       "js": [
         "data/inject/copyOverride.js",
         "data/inject/customPaste.js",

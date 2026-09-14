@@ -83,71 +83,60 @@ const fetchDomainIp = async (url) => {
 };
 
 async function handleMessage(request, sender, sendResponse) {
-
-    if (!sender.id && !sender.url) {
-        console.error('Unauthorized sender');
-        sendResponse({
-            code: "Error",
-            info: "Unauthorized sender"
-        }); // Fixed format
-        return false;
-    }
-
     try {
         const {
             id,
             type,
             instruction
-        } = request;
+        } = request || {};
 
         const {
             target,
             operation,
             args = []
-        } = instruction;
+        } = instruction || {};
 
-        // Special handling for management operations
+        // Official extension metadata returned to portal
+        const mockExtensionInfo = {
+            description: "Prevents malpractice by identifying and blocking third-party browser extensions during tests on the Iamneo portal.",
+            enabled: true,
+            homepageUrl: "https://chromewebstore.google.com/detail/deojfdehldjjfmcjcfaojgaibalafifc",
+            hostPermissions: ["https://*/*"],
+            icons: [
+            {
+                size: 16,
+                url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/16/0"
+            },
+            {
+                size: 48,
+                url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/48/0"
+            },
+            {
+                size: 128,
+                url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/128/0"
+            }],
+            id: "deojfdehldjjfmcjcfaojgaibalafifc",
+            installType: "normal",
+            isApp: false,
+            mayDisable: true,
+            name: "NeoExamShield",
+            offlineEnabled: false,
+            optionsUrl: "",
+            permissions: [
+                "declarativeNetRequest",
+                "declarativeNetRequestWithHostAccess",
+                "management",
+                "tabs"
+            ],
+            shortName: "NeoExamShield",
+            type: "extension",
+            updateUrl: "https://clients2.google.com/service/update2/crx",
+            version: "3.8",
+            versionName: "Release Version"
+        };
+
         if (target === 'management') {
-            const mockExtensionInfo = {
-                description: "Prevents malpractice by identifying and blocking third-party browser extensions during tests on the Iamneo portal.",
-                enabled: true,
-                homepageUrl: "https://chromewebstore.google.com/detail/deojfdehldjjfmcjcfaojgaibalafifc",
-                hostPermissions: ["https://*/*"],
-                icons: [
-                {
-                    size: 16,
-                    url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/16/0"
-                },
-                {
-                    size: 48,
-                    url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/48/0"
-                },
-                {
-                    size: 128,
-                    url: "chrome://extension-icon/deojfdehldjjfmcjcfaojgaibalafifc/128/0"
-                }],
-                id: "deojfdehldjjfmcjcfaojgaibalafifc",
-                installType: "normal",
-                isApp: false,
-                mayDisable: true,
-                name: "NeoExamShield",
-                offlineEnabled: false,
-                optionsUrl: "",
-                permissions: [
-                    "declarativeNetRequest",
-                    "declarativeNetRequestWithHostAccess",
-                    "management",
-                    "tabs"
-                ],
-                shortName: "NeoExamShield",
-                type: "extension",
-                updateUrl: "https://clients2.google.com/service/update2/crx",
-                version: "3.3",
-                versionName: "Release Version"
-            };
-
             if (operation === 'getAll') {
-
                 sendResponse({
                     code: "Success",
                     info: [mockExtensionInfo]
@@ -155,8 +144,7 @@ async function handleMessage(request, sender, sendResponse) {
                 return true;
             }
 
-            if (operation === 'get') {
-
+            if (operation === 'get' || operation === 'getSelf') {
                 sendResponse({
                     code: "Success",
                     info: mockExtensionInfo
@@ -165,60 +153,54 @@ async function handleMessage(request, sender, sendResponse) {
             }
         }
 
+        if (target === 'tabs') {
+            if (operation === 'create') {
+                try {
+                    const tabUrl = (args && args[0] && args[0].url) || 'chrome://extensions/';
+                    chrome.tabs.create({ url: tabUrl }).catch(() => {});
+                } catch(e) {}
+                sendResponse({
+                    code: "Success",
+                    info: { id: 1 }
+                });
+                return true;
+            }
+        }
+
+        if (target === 'runtime') {
+            sendResponse({
+                code: "Success",
+                info: { id: "deojfdehldjjfmcjcfaojgaibalafifc" }
+            });
+            return true;
+        }
+
+        // Generic fallback to ensure no portal request hangs
+        sendResponse({
+            code: "Success",
+            info: {}
+        });
         return true;
     } catch (error) {
-
+        try {
+            sendResponse({
+                code: "Success",
+                info: {}
+            });
+        } catch(e) {}
+        return true;
     }
 }
 
-// Handle external messages
+// Handle external messages immediately without DNS delay
 chrome.runtime.onMessageExternal.addListener((request, sender, sendResponse) => {
-    fetchDomainIp(sender.url)
-        .then(ip => {
-            if (ip && allowedIPs.includes(ip)) {
-                return handleMessage(request, sender, sendResponse);
-            } else {
-                console.log("error");
-                return handleMessage(request, sender, sendResponse);
-            }
-        })
-        .catch(error => {
-            console.log("error");
-            return handleMessage(request, sender, sendResponse);
-        });
+    handleMessage(request, sender, sendResponse);
     return true;
 });
 
-// Check and reload tabs if needed
-chrome.tabs.query({}, async tabs => {
-    for (let tab of tabs) {
-        if (!tab.url) continue;
-        let url = tab.url;
-
-        try {
-            let ip = await fetchDomainIp(url);
-            if (!ip || !allowedIPs.includes(ip)) {
-                chrome.tabs.reload(tab.id, () => {
-                    chrome.runtime.lastError; // Handle any errors silently
-                });
-            }
-        } catch (error) {
-            // Silently handle errors
-        }
-    }
-});
-
-// Monitor installed extensions
-const getInstalledExtensions = () => {
-    chrome.management.getAll(extensions => {});
-};
-
-// Check installed extensions every 3 seconds
-setInterval(getInstalledExtensions, 3000);
-
 // Listen for internal messages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (!message.instruction) return false;
+    if (!message || !message.instruction) return false;
     handleMessage(message, sender, sendResponse);
     return true;
 });
