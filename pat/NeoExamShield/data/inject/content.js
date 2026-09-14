@@ -300,19 +300,14 @@ function getQuestionSignature() {
         const qEl = findQuestionElement();
         const qText = qEl ? htmlToText(qEl).trim() : '';
         const optEls = findOptionElements();
-        const optsText = Array.from(optEls).map(el => htmlToText(el).trim()).filter(Boolean).join('|||');
-        
-        let imgSign = '';
-        if (qEl) {
-            const imgs = qEl.querySelectorAll('img');
-            imgSign = Array.from(imgs).map(img => img.src || '').join(',');
-        }
+        const optsText = Array.from(optEls).map(el => {
+            const clone = el.cloneNode(true);
+            clone.querySelectorAll('#neo-mcq-dot').forEach(d => d.remove());
+            return htmlToText(clone).trim();
+        }).filter(Boolean).join('|||');
 
-        const qNumEl = document.querySelector('[aria-labelledby*="question-number"], .question-index, .question-number, #question-no, .q-number, .testtaking-header span, .t-text-medium.t-font-medium');
-        const qNum = qNumEl ? qNumEl.innerText.trim() : '';
-
-        if (!qText && !optsText && !imgSign) return '';
-        return `${qNum}:::${qText}:::${optsText}:::${imgSign}`;
+        if (!qText && !optsText) return '';
+        return `${qText.substring(0, 300)}:::${optsText.substring(0, 300)}`;
     } catch (e) {
         return '';
     }
@@ -668,7 +663,8 @@ document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyS = event.code === 'KeyS' || 
                    (event.key && event.key.toLowerCase() === 's') || 
-                   event.key === 'ß'; // macOS Option+S produces 'ß'
+                   event.keyCode === 83 || event.which === 83 ||
+                   event.key === 'ß' || event.key === 'Ó' || event.key === 'ó';
 
     if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyS) {
         event.preventDefault();
@@ -684,23 +680,31 @@ document.addEventListener('keydown', (event) => {
         const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
 
         // Check if we have a valid solved answer matching the CURRENT question
-        const isMatch = lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null && (
+        const isMatch = lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null && lastSolvedMCQ.optionIndex >= 0 && (
             (lastSolvedMCQ.signature && currentSig && lastSolvedMCQ.signature === currentSig) ||
-            (lastSolvedMCQ.questionText && currentQText && lastSolvedMCQ.questionText === currentQText && currentQText.length > 5)
+            (lastSolvedMCQ.questionText && currentQText && (
+                lastSolvedMCQ.questionText === currentQText ||
+                lastSolvedMCQ.questionText.includes(currentQText.substring(0, 40)) ||
+                currentQText.includes(lastSolvedMCQ.questionText.substring(0, 40))
+            )) ||
+            (!currentSig && !currentQText)
         );
 
         if (isMatch) {
+            console.log('[Alt+S] Instantly auto-selecting previously solved MCQ option:', lastSolvedMCQ.optionIndex);
             autoSelectMCQOption(lastSolvedMCQ.optionIndex, lastSolvedMCQ.isHackerRank, lastSolvedMCQ.isMultipleChoice, lastSolvedMCQ.uniqueOptionNumbers);
             return;
         }
 
         // If AI is currently solving this question, queue auto-click so it clicks as soon as AI finishes
         if (isMCQSolving) {
+            console.log('[Alt+S] AI is currently solving - queued auto-click');
             pendingMCQAutoClick = true;
             return;
         }
 
         // If AI hasn't solved this question yet, trigger solve with auto-click enabled
+        console.log('[Alt+S] Triggering AI solve and auto-select');
         pendingMCQAutoClick = true;
         const isHackerRankSite = window.location.hostname.includes('hackerrank.com') || 
                                  document.querySelector('.QuestionDetails_container__AIu0X, .grouped-mcq__question, .hr-monaco-editor');
@@ -1082,27 +1086,56 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
 
     // Scroll into view
     try {
-        const scrollTarget = checkmark || label || target;
+        const scrollTarget = checkmark || label || input || target;
         if (scrollTarget) scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     } catch(e) {}
 
-    // Dispatch click on label and checkmark
-    if (label) dispatchHumanClick(label);
-    if (checkmark && checkmark !== label) dispatchHumanClick(checkmark);
+    // Priority 1: Checkmark span (Examly's primary click target)
+    let clicked = false;
+    if (checkmark) {
+        try {
+            checkmark.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        } catch(e) {}
+        try {
+            checkmark.click();
+            clicked = true;
+        } catch(e) {}
+    }
 
-    // Toggle radio input and trigger Angular change events
-    if (input) {
+    // Priority 2: Label
+    if (!clicked && label) {
+        try {
+            label.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+        } catch(e) {}
+        try {
+            label.click();
+            clicked = true;
+        } catch(e) {}
+    }
+
+    // Priority 3: Input
+    if (!clicked && input) {
+        try {
+            input.click();
+            clicked = true;
+        } catch(e) {}
+    }
+
+    // Priority 4: Target container
+    if (!clicked && target) {
+        try {
+            target.click();
+            clicked = true;
+        } catch(e) {}
+    }
+
+    // Ensure input is checked and dispatch Angular change events
+    if (input && !input.checked) {
         try {
             input.checked = true;
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
         } catch(e) {}
-        dispatchHumanClick(input);
-    }
-
-    // Also click outer container if separate
-    if (target && target !== label && target !== checkmark && target !== input) {
-        dispatchHumanClick(target);
     }
 
     // Post to MAIN world for Angular Zone.js trigger
@@ -1262,6 +1295,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                 message: toastMsg || request.response
                             });
                         }
+                    } else {
+                        // Fallback: If optionIndex could not be resolved, show toast so user sees the answer
+                        console.warn('[MCQ] Could not resolve option index from AI response:', request.response);
+                        chrome.runtime.sendMessage({
+                            action: 'showMCQToast',
+                            message: request.response
+                        });
                     }
                 }
             } catch (error) {

@@ -609,16 +609,20 @@ try {
                     const lbl = el.querySelector('label') || (el.tagName && el.tagName.toLowerCase() === 'label' ? el : null);
                     const chk = el.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
                     
-                    if (lbl) lbl.click();
-                    if (chk && chk !== lbl) chk.click();
-                    if (inp) {
+                    if (chk) {
+                        chk.click();
+                    } else if (lbl) {
+                        lbl.click();
+                    } else if (inp) {
                         inp.click();
+                    } else {
+                        el.click();
+                    }
+
+                    if (inp && !inp.checked) {
                         inp.checked = true;
                         inp.dispatchEvent(new Event('input', { bubbles: true }));
                         inp.dispatchEvent(new Event('change', { bubbles: true }));
-                    }
-                    if (el !== lbl && el !== chk && el !== inp) {
-                        el.click();
                     }
                 }
             } catch (e) {}
