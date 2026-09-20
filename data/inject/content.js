@@ -898,7 +898,7 @@ function getPageSelectedText() {
     return text;
 }
 
-// Alt+A (Option+A on macOS): If text is selected, show answer in Chatbot; otherwise solve question with dot indicator
+// Alt+A (Option+A on macOS): Solve MCQ or Coding question (Reveal mode: shows small dot, NEVER clicks)
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyA = event.code === 'KeyA' || 
@@ -911,7 +911,26 @@ document.addEventListener('keydown', (event) => {
         event.stopPropagation();
         if (isActionThrottled('alt_a')) return;
 
-        // If user has selected text on page, answer it in ChatBot!
+        activeMCQMode = 'reveal';
+        lastTriggeredMode = 'reveal';
+        pendingMCQAutoClick = false;
+        solveIamneoExamly();
+    }
+}, true); // useCapture: true to intercept before portal listeners
+
+// Alt+M (Option+M on macOS): If text is selected, show answer in Chatbot
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+    const isKeyM = event.code === 'KeyM' || 
+                   (event.key && event.key.toLowerCase() === 'm') || 
+                   event.keyCode === 77 || event.which === 77 ||
+                   event.key === 'µ' || event.key === 'Â';
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyM) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (isActionThrottled('alt_m')) return;
+
         const selectedText = getPageSelectedText();
         if (selectedText && selectedText.length > 0) {
             chrome.runtime.sendMessage({
@@ -923,13 +942,12 @@ document.addEventListener('keydown', (event) => {
             } else {
                 window.dispatchEvent(new CustomEvent('neoAskChatbot', { detail: { text: selectedText } }));
             }
-            return;
+        } else {
+            chrome.runtime.sendMessage({
+                action: 'showMCQToast',
+                message: 'Please select text first to send to Chatbot'
+            });
         }
-
-        activeMCQMode = 'reveal';
-        lastTriggeredMode = 'reveal';
-        pendingMCQAutoClick = false;
-        solveIamneoExamly();
     }
 }, true); // useCapture: true to intercept before portal listeners
 

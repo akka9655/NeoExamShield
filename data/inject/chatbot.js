@@ -2871,9 +2871,9 @@ if (typeof window.isMac === 'undefined') {
                 toggleChatOverlay();
             }
 
-            // Alt+A (Option+A on macOS): If text is selected, answer in Chatbot
-            const isKeyA = e.code === "KeyA" || (e.key && e.key.toLowerCase() === "a") || e.keyCode === 65 || e.key === "å" || e.key === "Å";
-            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyA) {
+            // Alt+M (Option+M on macOS): If text is selected, answer in Chatbot
+            const isKeyM = e.code === "KeyM" || (e.key && e.key.toLowerCase() === "m") || e.keyCode === 77 || e.key === "µ" || e.key === "Â";
+            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyM) {
                 const selectedText = getPageSelectedText();
                 if (selectedText && selectedText.length > 0) {
                     e.preventDefault();
