@@ -429,20 +429,17 @@ if (typeof window.isMac === 'undefined') {
 
         // Helper function to access elements in shadow DOM
         function getShadowElement(id) {
-            const shadowHost = document.getElementById('chat-overlay-shadow-host');
-            if (!shadowHost || !shadowHost.shadowRoot) return null;
-            return shadowHost.shadowRoot.getElementById(id);
+            const root = window._neoChatShadowRoot || (window._neoChatShadowHost && window._neoChatShadowHost.shadowRoot) || document.getElementById('chat-overlay-shadow-host')?.shadowRoot;
+            if (!root) return null;
+            return root.getElementById(id);
         }
         
         function getShadowRoot() {
-            const shadowHost = document.getElementById('chat-overlay-shadow-host');
-            return shadowHost ? shadowHost.shadowRoot : null;
+            return window._neoChatShadowRoot || (window._neoChatShadowHost && window._neoChatShadowHost.shadowRoot) || document.getElementById('chat-overlay-shadow-host')?.shadowRoot;
         }
         
         function getChatButton() {
-            const buttonShadowHost = document.getElementById('chat-button-shadow-host');
-            if (!buttonShadowHost || !buttonShadowHost.shadowRoot) return null;
-            return buttonShadowHost.shadowRoot.getElementById('chat-button');
+            return null; // Button permanently eliminated for maximum stealth
         }
 
         // Drag and resize state
@@ -460,8 +457,17 @@ if (typeof window.isMac === 'undefined') {
 
         // Question extraction functions
         function detectPlatform() {
+            // Check for FacePrep (student.faceprep.in or FacePrep UI elements)
+            if (window.location.hostname.includes('faceprep.in') ||
+                document.querySelector('button[data-testid^="mcq-option-"]') ||
+                document.querySelector('[data-testid="prev-question-btn"]') ||
+                document.querySelector('[data-testid="reading-passage"]') ||
+                document.querySelector('[data-testid="assessment-card"]') ||
+                document.querySelector('img[src*="faceprep"]')) {
+                return 'faceprep';
+            }
             // Check for Examly/IamNeo
-            if (document.querySelector('div[aria-labelledby="question-data"]')) {
+            if (document.querySelector('div[aria-labelledby="question-data"], testtaking-playground, test-taking, testtaking-question, mcqsinglecorrect-question, mcqmultiplecorrect-question, programming-question')) {
                 return 'examly';
             }
             // Check for HackerRank
@@ -473,18 +479,113 @@ if (typeof window.isMac === 'undefined') {
             return null;
         }
 
+        function extractFacePrepQuestion() {
+            try {
+                // 1. Check for MCQ options
+                const optionButtons = document.querySelectorAll('button[data-testid^="mcq-option-"]');
+                if (optionButtons && optionButtons.length > 0) {
+                    // FacePrep MCQ
+                    let headerText = "";
+                    const headerEl = document.querySelector('.bg-white.rounded-xl header, header, .shadow-brutal-header');
+                    if (headerEl) headerText = headerEl.innerText.trim();
+
+                    // In MCQUI, question markdown is inside div.w-full before the h-px divider
+                    let questionText = "";
+                    const divider = document.querySelector('div.w-full div.h-px, div.h-px.bg-gray-500');
+                    if (divider && divider.previousElementSibling) {
+                        questionText = divider.previousElementSibling.innerText.trim();
+                    } else {
+                        const questionContainers = document.querySelectorAll('div[class*="overflow-y-auto"] .w-full, div.w-full');
+                        if (questionContainers.length > 0) {
+                            questionText = questionContainers[0].innerText.trim();
+                        }
+                    }
+
+                    // Reading passage if present
+                    const passageEl = document.querySelector('[data-testid="reading-passage"]');
+                    const passageText = passageEl ? passageEl.innerText.trim() : "";
+
+                    const optionsText = [];
+                    optionButtons.forEach((btn, idx) => {
+                        const clone = btn.cloneNode(true);
+                        const badge = clone.querySelector('span.rounded-md, span.min-w-8');
+                        const letter = badge ? badge.innerText.trim() : String.fromCharCode(65 + idx);
+                        if (badge) badge.remove();
+                        const optContent = clone.innerText.trim();
+                        optionsText.push(`Option ${letter}: ${optContent}`);
+                    });
+
+                    return {
+                        type: 'mcq',
+                        title: headerText || (passageText ? 'Reading Comprehension Question' : 'MCQ Question'),
+                        instruction: passageText ? `Passage:\n${passageText}` : '',
+                        question: questionText,
+                        options: optionsText.join('\n')
+                    };
+                }
+
+                // 2. Check for Coding Challenge (Monaco Editor)
+                const monacoEl = document.querySelector('.monaco-editor');
+                if (monacoEl) {
+                    let title = "Coding Challenge";
+                    const titleBadge = document.querySelector('.w-full span.inline-flex, span[class*="rounded-lg"]');
+                    if (titleBadge) title = titleBadge.innerText.trim();
+
+                    let questionText = "";
+                    const descContainer = document.querySelector('div[class*="overflow-y-auto"] .w-full, div.w-full');
+                    if (descContainer) questionText = descContainer.innerText.trim();
+
+                    let language = "Unknown";
+                    const selectEl = document.querySelector('select');
+                    if (selectEl) {
+                        language = selectEl.options[selectEl.selectedIndex]?.text || selectEl.value;
+                    }
+
+                    let currentCode = "";
+                    if (typeof monaco !== 'undefined' && window.monaco && window.monaco.editor) {
+                        const editors = window.monaco.editor.getEditors();
+                        if (editors && editors.length > 0) {
+                            currentCode = editors[0].getValue();
+                        }
+                    }
+
+                    return {
+                        type: 'coding',
+                        language: language,
+                        title: title,
+                        question: questionText,
+                        code: currentCode
+                    };
+                }
+
+                return null;
+            } catch (err) {
+                console.error('[FacePrep] Extraction error:', err);
+                return null;
+            }
+        }
+
         function extractExamlyQuestion() {
-            const questionElement = document.querySelector('div[aria-labelledby="question-data"]');
+            const questionElement = document.querySelector('div[aria-labelledby="question-data"], testtaking-question .ql-editor, div.ql-editor') ||
+                                   document.querySelector('testtaking-question');
             if (!questionElement) return null;
 
             const questionText = questionElement.innerText.trim();
 
-            // Check if it's a coding question
-            const codingQuestionElement = document.querySelector('div[aria-labelledby="input-format"]');
-            
-            if (codingQuestionElement) {
+            // Check if MCQ answer elements or options exist
+            const mcqAnswerEl = document.querySelector('mcqsinglecorrect-answer, mcqmultiplecorrect-answer, [aria-labelledby="mcqsinglecorrect-container"], [aria-labelledby="mcqmultiplecorrect-container"]');
+            const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"], [id^="tt-option-"]');
+
+            const qTypeBadge = document.querySelector('testtaking-question [aria-labelledby="question-type"], div[aria-labelledby="question-type"]');
+            const qTypeText = qTypeBadge ? (qTypeBadge.innerText || qTypeBadge.textContent || '').trim().toLowerCase() : '';
+            const isExplicitMCQ = qTypeText.includes('multi choice') || qTypeText.includes('multiple choice') || qTypeText.includes('mcq') || qTypeText.includes('single correct') || qTypeText.includes('multiple correct');
+            const isExplicitCoding = qTypeText.includes('programming') || qTypeText.includes('single file') || qTypeText.includes('coding');
+
+            const isMCQ = isExplicitMCQ || (mcqAnswerEl !== null) || (optionsElements.length > 0 && !isExplicitCoding);
+
+            if (!isMCQ) {
                 // Coding question
-                const programmingLanguageElement = document.querySelector('span.inner-text');
+                const programmingLanguageElement = document.querySelector('app-language-dropdown span.inner-text, span.inner-text');
                 const programmingLanguage = programmingLanguageElement ? programmingLanguageElement.innerText.trim() : 'Programming language not found.';
 
                 const inputFormatElement = document.querySelector('div[aria-labelledby="input-format"]');
@@ -514,18 +615,28 @@ if (typeof window.isMac === 'undefined') {
                     testCases: testCasesText
                 };
             } else {
-                // MCQ question
+                // MCQ question (including MCQs with code snippets)
                 const codeLines = [];
                 const codeElements = document.querySelectorAll('.ace_layer.ace_text-layer .ace_line');
                 codeElements.forEach(line => {
-                    codeLines.push(line.innerText.trim());
+                    const txt = (line.innerText !== undefined ? line.innerText : line.textContent || '').replace(/\r/g, '');
+                    codeLines.push(txt);
                 });
-                const codeText = codeLines.length > 0 ? codeLines.join('\n') : null;
+                let codeText = (codeLines.length > 0 && codeLines.some(l => l.trim().length > 0)) ? codeLines.join('\n') : null;
 
-                const optionsElements = document.querySelectorAll('div[aria-labelledby="each-option"]');
+                if (!codeText) {
+                    const preCode = document.querySelector('testtaking-question pre code, testtaking-question pre, .ql-syntax');
+                    if (preCode) codeText = preCode.innerText.trim();
+                }
+
                 const optionsText = [];
-                optionsElements.forEach((option, index) => {
-                    optionsText.push(`Option ${index + 1}: ${option.innerText.trim()}`);
+                const seenOptions = new Set();
+                optionsElements.forEach((option) => {
+                    const txt = option.innerText.trim();
+                    if (txt && !seenOptions.has(txt)) {
+                        seenOptions.add(txt);
+                        optionsText.push(`Option ${optionsText.length + 1}: ${txt}`);
+                    }
                 });
 
                 return {
@@ -695,7 +806,9 @@ if (typeof window.isMac === 'undefined') {
         function extractCurrentQuestion() {
             const platform = detectPlatform();
             
-            if (platform === 'examly') {
+            if (platform === 'faceprep') {
+                return extractFacePrepQuestion();
+            } else if (platform === 'examly') {
                 return extractExamlyQuestion();
             } else if (platform === 'hackerrank') {
                 return extractHackerRankQuestion();
@@ -780,6 +893,8 @@ if (typeof window.isMac === 'undefined') {
             // Create shadow host element
             shadowHost = document.createElement("div");
             shadowHost.id = "chat-overlay-shadow-host";
+            shadowHost.setAttribute("data-neo-stealth", "true");
+            shadowHost.setAttribute("aria-hidden", "true");
             shadowHost.style.cssText = `
                 position: fixed;
                 bottom: 0;
@@ -793,53 +908,62 @@ if (typeof window.isMac === 'undefined') {
 
             const overlay = document.createElement("div");
             overlay.id = "chat-overlay";
+            overlay.setAttribute("data-neo-stealth", "true");
             overlay.style.cssText = `
                 display: ${isOverlayVisible ? "flex" : "none"};
                 position: fixed;
                 bottom: 20px;
                 right: 20px;
-                width: 380px;
-                height: 500px;
-                background-color: #fff;
-                border: none;
-                border-radius: 16px;
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+                width: 390px;
+                height: 520px;
+                background-color: rgba(255, 255, 255, 0.78);
+                backdrop-filter: blur(20px) saturate(180%);
+                -webkit-backdrop-filter: blur(20px) saturate(180%);
+                border: 1px solid rgba(255, 255, 255, 0.6);
+                border-radius: 18px;
+                box-shadow: 0 16px 40px rgba(0, 0, 0, 0.14), inset 0 0 0 1px rgba(255, 255, 255, 0.4);
                 z-index: 2147483647;
                 flex-direction: column;
                 font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 overflow: hidden;
-                transition: opacity 0.3s ease;
+                transition: opacity 0.25s ease, background-color 0.25s ease;
                 pointer-events: auto;
+                opacity: 0.88;
             `;
 
             // Create header
             const header = document.createElement("div");
             header.style.cssText = `
-            padding: 16px 20px !important;
+            padding: 13px 18px !important;
             font-weight: 500 !important;
             display: flex !important;
             justify-content: space-between !important;
             align-items: center !important;
-            background-color: #fff !important;
+            background-color: rgba(255, 255, 255, 0.65) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
             color: #333 !important;
             cursor: move !important;
+            user-select: none !important;
         `;
 
             header.innerHTML = `
         <div style="display: flex !important; flex-direction: column !important; align-items: flex-start !important; gap: 2px !important;">
-            <span style="display: flex !important; align-items: center !important; gap: 8px !important; font-size: 18px !important; font-weight: 700 !important; color: rgb(60, 84, 114) !important; opacity: 0.85 !important;">
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <span style="display: flex !important; align-items: center !important; gap: 8px !important; font-size: 17px !important; font-weight: 700 !important; color: rgb(60, 84, 114) !important;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                 </svg>
                 Chat
             </span>
-            <span style="font-size: 12px !important; font-weight: 500 !important; color: #777 !important; margin-left: 30px !important;">
-                ${window.isMac ? 'Option+C' : 'Alt+C'} to toggle
+            <span style="font-size: 11px !important; font-weight: 500 !important; color: #777 !important; margin-left: 28px !important;">
+                ${window.isMac ? 'Option+D' : 'Alt+D'} to hide
             </span>
         </div>
-        <div style="display: flex !important; gap: 14px !important; align-items: center !important;">
-            <span id="clear-chat" style="cursor: pointer !important; font-size: 14px !important; font-weight: 600 !important; color: rgb(220, 53, 69) !important; padding: 4px 8px !important; transition: all 0.2s ease !important;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">Clear</span>
-            <span id="close-chat" style="cursor: pointer !important; font-size: 22px !important; line-height: 1 !important; color: #888 !important; transition: color 0.2s ease !important; font-weight: 500 !important;" onmouseover="this.style.color='#333'" onmouseout="this.style.color='#888'">×</span>
+        <div style="display: flex !important; gap: 8px !important; align-items: center !important;">
+            <button id="ghost-toggle" title="Cycle transparency (Glass / Ghost / Normal)" style="background: rgba(60, 84, 114, 0.08); border: 1px solid rgba(60, 84, 114, 0.2); border-radius: 6px; padding: 3px 9px; font-size: 11px; font-weight: 600; color: rgb(60, 84, 114); cursor: pointer; transition: all 0.2s ease;">Ghost</button>
+            <span id="clear-chat" style="cursor: pointer !important; font-size: 13px !important; font-weight: 600 !important; color: rgb(220, 53, 69) !important; padding: 4px 6px !important; transition: all 0.2s ease !important;" onmouseover="this.style.opacity='0.7'" onmouseout="this.style.opacity='1'">Clear</span>
+            <span id="close-chat" style="cursor: pointer !important; font-size: 22px !important; line-height: 1 !important; color: #888 !important; transition: color 0.2s ease !important; font-weight: 500 !important; padding: 0 4px !important;" onmouseover="this.style.color='#333'" onmouseout="this.style.color='#888'">×</span>
         </div>
         `;
 
@@ -847,8 +971,8 @@ if (typeof window.isMac === 'undefined') {
             const sliderContainer = document.createElement("div");
             sliderContainer.style.cssText = `
                 width: 100%;
-                height: 2px;
-                background-color: rgba(60, 84, 114, 0.1);
+                height: 3px;
+                background-color: rgba(60, 84, 114, 0.12);
                 position: relative;
                 z-index: 10;
                 display: flex;
@@ -857,9 +981,9 @@ if (typeof window.isMac === 'undefined') {
 
             const opacitySlider = document.createElement("input");
             opacitySlider.type = "range";
-            opacitySlider.min = "15";
+            opacitySlider.min = "10";
             opacitySlider.max = "100";
-            opacitySlider.value = "100";
+            opacitySlider.value = "88";
             opacitySlider.id = "opacity-slider";
             opacitySlider.title = "Adjust opacity / Enable Stealth Mode";
             sliderContainer.appendChild(opacitySlider);
@@ -868,11 +992,13 @@ if (typeof window.isMac === 'undefined') {
             const messagesContainer = document.createElement("div");
             messagesContainer.id = "chat-messages";
             messagesContainer.style.cssText = `
-        padding: 20px;
+        padding: 16px;
         flex: 1;
         overflow-y: auto;
-        background-color: #fafafa;
-        color: #333;
+        background-color: rgba(248, 249, 251, 0.45);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
+        color: #222;
         scroll-behavior: smooth;
         white-space: pre-wrap;
         display: flex;
@@ -883,8 +1009,11 @@ if (typeof window.isMac === 'undefined') {
             // Create input area
             const inputArea = document.createElement("div");
             inputArea.style.cssText = `
-        padding: 12px 16px 16px 16px;
-        background-color: #fff;
+        padding: 10px 14px 14px 14px;
+        background-color: rgba(255, 255, 255, 0.65);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-top: 1px solid rgba(0, 0, 0, 0.06);
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -896,12 +1025,14 @@ if (typeof window.isMac === 'undefined') {
             buttonContainer.style.cssText = `
         display: flex;
         align-items: stretch; /* Stretch children to fill height */
-        background-color: #f4f6f8;
-        border: 1px solid rgba(0, 0, 0, 0.08);
+        background-color: rgba(242, 245, 248, 0.85);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(0, 0, 0, 0.1);
         border-radius: 24px;
         padding: 0; /* Remove all padding from container */
         transition: all 0.2s ease;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
         gap: 0;
         overflow: hidden; /* Ensures inner elements don't break the pill curve */
         min-height: 44px;
@@ -1201,6 +1332,8 @@ if (typeof window.isMac === 'undefined') {
                 if (questionData.question) hashString += questionData.question;
                 if (questionData.title) hashString += questionData.title;
                 if (questionData.instruction) hashString += questionData.instruction;
+                if (questionData.options) hashString += questionData.options;
+                if (questionData.code) hashString += questionData.code;
                 
                 // Simple hash function
                 let hash = 0;
@@ -1610,10 +1743,11 @@ if (typeof window.isMac === 'undefined') {
             overlay.appendChild(inputArea);
             overlay.appendChild(resizeHandle);
             shadowRoot.appendChild(overlay);
-            (document.body || document.documentElement)?.appendChild(shadowHost);
             
-            // Store shadow root reference for later access
+            // Store shadow host and shadow root references (lazy attached on Alt+D)
             shadowHost._shadowRoot = shadowRoot;
+            window._neoChatShadowHost = shadowHost;
+            window._neoChatShadowRoot = shadowRoot;
 
             // Add placeholder behavior after element is in DOM
             inputField.addEventListener('focus', function() {
@@ -1646,55 +1780,60 @@ if (typeof window.isMac === 'undefined') {
                 dragOffsetY = e.clientY - overlay.getBoundingClientRect().top;
             });
 
-            // Add event listeners for stealth-mode
-            // Get the initial state from storage
+            // Wire up Ghost transparency button
+            const ghostBtn = header.querySelector("#ghost-toggle");
+            if (ghostBtn) {
+                ghostBtn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    let cur = parseFloat(overlay.style.opacity) || 0.88;
+                    let next;
+                    if (cur > 0.65) {
+                        next = 0.45;
+                        ghostBtn.textContent = "Ghost 45%";
+                    } else if (cur > 0.30) {
+                        next = 0.20;
+                        ghostBtn.textContent = "Ghost 20%";
+                    } else {
+                        next = 0.88;
+                        ghostBtn.textContent = "Ghost";
+                    }
+                    overlay.style.opacity = next.toString();
+                    const slider = shadowRoot.querySelector("#opacity-slider");
+                    if (slider) slider.value = Math.round(next * 100);
+                    chrome.storage.local.set({ 
+                        stealthOpacity: Math.round(next * 100) 
+                    });
+                });
+            }
+
+            // Add event listeners for stealth-mode & transparency slider
             chrome.storage.local.get(['stealth', 'stealthOpacity'], function(result) {
-                // Initialize stealth mode based on storage
                 let stealthModeEnabled = result.stealth === true;
-                let currentOpacity = result.stealthOpacity || (stealthModeEnabled ? 15 : 100);
+                let currentOpacity = result.stealthOpacity || (stealthModeEnabled ? 20 : 88);
                 
                 const slider = shadowRoot.querySelector("#opacity-slider");
                 if (slider) {
-                    slider.value = stealthModeEnabled ? currentOpacity : 100;
-                    
-                    if (stealthModeEnabled) {
-                        overlay.style.opacity = currentOpacity / 100;
-                    } else {
-                        overlay.style.opacity = "1";
+                    slider.value = currentOpacity;
+                    overlay.style.opacity = (currentOpacity / 100).toString();
+                    if (ghostBtn) {
+                        if (currentOpacity <= 25) ghostBtn.textContent = `Ghost ${currentOpacity}%`;
+                        else if (currentOpacity <= 55) ghostBtn.textContent = `Ghost ${currentOpacity}%`;
+                        else ghostBtn.textContent = "Ghost";
                     }
                     
                     slider.addEventListener("input", (e) => {
                         const val = parseInt(e.target.value);
-                        overlay.style.opacity = val / 100;
+                        overlay.style.opacity = (val / 100).toString();
+                        if (ghostBtn) {
+                            if (val <= 30) ghostBtn.textContent = `Ghost ${val}%`;
+                            else if (val <= 65) ghostBtn.textContent = `Ghost ${val}%`;
+                            else ghostBtn.textContent = "Ghost";
+                        }
                     });
                     
                     slider.addEventListener("change", (e) => {
                         const val = parseInt(e.target.value);
-                        const isStealth = val < 100;
-                        
-                        // Only send notification if stealth mode STATE changed
-                        if (isStealth !== stealthModeEnabled) {
-                            stealthModeEnabled = isStealth;
-                            const chatButton = getChatButton();
-                            if (chatButton) {
-                                chatButton.style.opacity = isStealth ? "0" : "1";
-                            }
-                            
-                            if (isStealth) {
-                                chrome.runtime.sendMessage({
-                                    action: 'showStealthToast',
-                                    message: `Hover over the area where the chat icon is located \nor press ${window.isMac ? 'Option+C' : 'Alt+C'} to access [Chatbot opacity reduced]`,
-                                    stealthEnabled: true
-                                });
-                            } else {
-                                chrome.runtime.sendMessage({
-                                    action: 'showStealthToast',
-                                    message: 'Chat icon is now visible',
-                                    stealthEnabled: false
-                                });
-                            }
-                        }
-                        
+                        const isStealth = val < 88;
                         chrome.storage.local.set({ 
                             stealth: isStealth,
                             stealthOpacity: val
@@ -1707,10 +1846,8 @@ if (typeof window.isMac === 'undefined') {
                     if (namespace === 'local' && slider) {
                         if (changes.stealthOpacity) {
                             currentOpacity = changes.stealthOpacity.newValue;
-                            if (stealthModeEnabled) {
-                                slider.value = currentOpacity;
-                                if (overlay) overlay.style.opacity = currentOpacity / 100;
-                            }
+                            slider.value = currentOpacity;
+                            if (overlay) overlay.style.opacity = (currentOpacity / 100).toString();
                         }
                         
                         if (changes.stealth) {
@@ -1796,8 +1933,7 @@ if (typeof window.isMac === 'undefined') {
             const closeButton = header.querySelector("#close-chat");
             if (closeButton) {
                 closeButton.addEventListener("click", () => {
-                    isOverlayVisible = false;
-                    overlay.style.display = "none";
+                    toggleChatOverlay(false);
                 });
             }
 
@@ -1808,118 +1944,135 @@ if (typeof window.isMac === 'undefined') {
                 });
             }
 
-            // Handle message sending
+            // Reusable function to send a message to the AI chatbot and display response
+            async function sendChatMessageToAI(messageText) {
+                const message = (messageText || "").trim();
+                if (!message) return;
+
+                // Ensure overlay is open and visible
+                toggleChatOverlay(true);
+
+                try {
+                    // Clear any error state before sending new message
+                    clearErrorState();
+                    
+                    // Prepare the final message to send
+                    let finalMessage = message;
+                    
+                    // If "Chat about question" is enabled, prepend the question
+                    if (chatAboutQuestionEnabled && extractedQuestion) {
+                        finalMessage = `Context: Below is the question I'm working on:\n\n${extractedQuestion}\n\n---\n\nMy Question: ${message}`;
+                    }
+                    
+                    chatHistory.push({
+                        role: "user",
+                        content: message
+                    });
+
+                    addMessageToChat(message, "user");
+
+                    const currentInputField = getShadowRoot()?.querySelector('[contenteditable]');
+                    if (currentInputField && currentInputField.innerText.trim() === message) {
+                        currentInputField.innerText = "";
+                    }
+
+                    // Add enhanced loading indicator
+                    const currentMessagesContainer = getShadowElement("chat-messages");
+                    const loadingDiv = addLoadingIndicator();
+                    if (currentMessagesContainer) {
+                        currentMessagesContainer.appendChild(loadingDiv);
+                        currentMessagesContainer.scrollTop = currentMessagesContainer.scrollHeight;
+                    }
+
+                    // Send message and wait for response with timeout
+                    await new Promise((resolve, reject) => {
+                        let timeoutId;
+                        let resolved = false;
+                        
+                        // Set up timeout (30 seconds)
+                        timeoutId = setTimeout(() => {
+                            if (!resolved) {
+                                resolved = true;
+                                reject(new Error('Request timed out. Please try again.'));
+                            }
+                        }, 30000);
+                        
+                        // Listen for response
+                        const messageListener = (msg) => {
+                            if (msg.action === "updateChatHistory" && !resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                chrome.runtime.onMessage.removeListener(messageListener);
+                                resolve(msg);
+                            }
+                        };
+                        
+                        chrome.runtime.onMessage.addListener(messageListener);
+                        
+                        // Send the message
+                        const validContext = createValidContext(chatHistory);
+                        chrome.runtime.sendMessage({
+                            action: "processChatMessage",
+                            message: finalMessage,
+                            context: validContext
+                        }).catch((error) => {
+                            if (!resolved) {
+                                resolved = true;
+                                clearTimeout(timeoutId);
+                                chrome.runtime.onMessage.removeListener(messageListener);
+                                reject(error);
+                            }
+                        });
+                    });
+                    
+                    // Remove loading indicator
+                    const loadingMessage = getShadowElement("loading-message");
+                    if (loadingMessage) {
+                        loadingMessage.remove();
+                    }
+                }
+                catch (error) {
+                    console.error("Error sending message:", error);
+                    
+                    // Remove loading indicator if it exists
+                    const loadingMessage = getShadowElement("loading-message");
+                    if (loadingMessage) {
+                        loadingMessage.remove();
+                    }
+                    
+                    // Handle different types of errors with appropriate messages
+                    let errorMessage = "I encountered an error processing your message. Please try again.";
+                    let isRateLimitError = false;
+                    
+                    if (error.message) {
+                        if (error.message.includes('timeout') || error.message.includes('timed out')) {
+                            errorMessage = "The request timed out. The service might be experiencing high load. Please try again in a moment.";
+                        } else if (error.message.includes('rate limit') || error.message.includes('Daily request limit')) {
+                            errorMessage = "You've reached your daily chat limit. Please try again tomorrow.";
+                            isRateLimitError = true;
+                        } else if (error.message.includes('Network') || error.message.includes('connection')) {
+                            errorMessage = "Unable to connect to the chat service. Please check your internet connection and try again.";
+                        } else if (error.message.includes('login') || error.message.includes('authentication')) {
+                            errorMessage = "Please log in to use the chat feature. Click the extension icon to log in.";
+                        } else {
+                            errorMessage = error.message;
+                        }
+                    }
+                    
+                    // Add error message to chat with special styling
+                    addErrorMessageToChat(errorMessage, isRateLimitError);
+                }
+            }
+
+            // Expose globally for content.js and other scripts to invoke
+            window.neoAskChatbot = sendChatMessageToAI;
+
+            // Handle message sending via send button
             sendButton.addEventListener("click", async () => {
                 const message = inputField.innerText.trim();
                 if (message) {
-                    try {
-                        // Clear any error state before sending new message
-                        clearErrorState();
-                        
-                        // Prepare the final message to send
-                        let finalMessage = message;
-                        
-                        // If "Chat about question" is enabled, prepend the question
-                        if (chatAboutQuestionEnabled && extractedQuestion) {
-                            finalMessage = `Context: Below is the question I'm working on:\n\n${extractedQuestion}\n\n---\n\nMy Question: ${message}`;
-                            console.log('Sending message with question context');
-                        }
-                        
-                        chatHistory.push({
-                            role: "user",
-                            content: message
-                        });
-
-                        addMessageToChat(message, "user");
-                        inputField.innerText = "";
-
-                        // Add enhanced loading indicator
-                        const loadingDiv = addLoadingIndicator();
-                        messagesContainer.appendChild(loadingDiv);
-
-                        // Send message and wait for response with timeout
-                        const response = await new Promise((resolve, reject) => {
-                            let timeoutId;
-                            let resolved = false;
-                            
-                            // Set up timeout (30 seconds)
-                            timeoutId = setTimeout(() => {
-                                if (!resolved) {
-                                    resolved = true;
-                                    reject(new Error('Request timed out. Please try again.'));
-                                }
-                            }, 30000);
-                            
-                            // Listen for response
-                            const messageListener = (message) => {
-                                if (message.action === "updateChatHistory" && !resolved) {
-                                    resolved = true;
-                                    clearTimeout(timeoutId);
-                                    chrome.runtime.onMessage.removeListener(messageListener);
-                                    resolve(message);
-                                }
-                            };
-                            
-                            chrome.runtime.onMessage.addListener(messageListener);
-                            
-                            // Send the message (with question context if enabled)
-                            // Create valid conversation context (filters errors and ensures proper role flow)
-                            const validContext = createValidContext(chatHistory);
-                            chrome.runtime.sendMessage({
-                                action: "processChatMessage",
-                                message: finalMessage, // Send the final message with or without question context
-                                context: validContext
-                            }).catch((error) => {
-                                if (!resolved) {
-                                    resolved = true;
-                                    clearTimeout(timeoutId);
-                                    chrome.runtime.onMessage.removeListener(messageListener);
-                                    reject(error);
-                                }
-                            });
-                        });
-                        
-                        // Remove loading indicator
-                        const loadingMessage = getShadowElement("loading-message");
-                        if (loadingMessage) {
-                            loadingMessage.remove();
-                        }
-                        
-                        // The response will be handled by the runtime message listener
-                        // No need to add the message here as it will be added via "updateChatHistory"
-                    }
-                    catch (error) {
-                        console.error("Error sending message:", error);
-                        
-                        // Remove loading indicator if it exists
-                        const loadingMessage = getShadowElement("loading-message");
-                        if (loadingMessage) {
-                            loadingMessage.remove();
-                        }
-                        
-                        // Handle different types of errors with appropriate messages
-                        let errorMessage = "I encountered an error processing your message. Please try again.";
-                        let isRateLimitError = false;
-                        
-                        if (error.message) {
-                            if (error.message.includes('timeout') || error.message.includes('timed out')) {
-                                errorMessage = "The request timed out. The service might be experiencing high load. Please try again in a moment.";
-                            } else if (error.message.includes('rate limit') || error.message.includes('Daily request limit')) {
-                                errorMessage = "You've reached your daily chat limit. Please try again tomorrow.";
-                                isRateLimitError = true;
-                            } else if (error.message.includes('Network') || error.message.includes('connection')) {
-                                errorMessage = "Unable to connect to the chat service. Please check your internet connection and try again.";
-                            } else if (error.message.includes('login') || error.message.includes('authentication')) {
-                                errorMessage = "Please log in to use the chat feature. Click the extension icon to log in.";
-                            } else {
-                                // Use the error message if it's user-friendly
-                                errorMessage = error.message;
-                            }
-                        }
-                        
-                        // Add error message to chat with special styling
-                        addErrorMessageToChat(errorMessage, isRateLimitError);
-                    }
+                    inputField.innerText = "";
+                    await sendChatMessageToAI(message);
                 }
             });
             
@@ -1951,178 +2104,9 @@ if (typeof window.isMac === 'undefined') {
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // Create the chat button
+        // Chat button permanently eliminated - overlay opens strictly via Alt+D (Option+D on Mac)
         function createChatButton() {
-            // Check if shadow host for button already exists
-            let buttonShadowHost = document.getElementById("chat-button-shadow-host");
-            if (buttonShadowHost) {
-                return buttonShadowHost.shadowRoot.querySelector("#chat-button");
-            }
-
-            // Create shadow host element for button
-            buttonShadowHost = document.createElement("div");
-            buttonShadowHost.id = "chat-button-shadow-host";
-            buttonShadowHost.style.cssText = `
-                position: fixed;
-                bottom: 0;
-                right: 0;
-                z-index: 2147483647;
-                pointer-events: none;
-            `;
-
-            // Attach shadow root
-            const buttonShadowRoot = buttonShadowHost.attachShadow({ mode: 'open' });
-
-            // Create comprehensive CSS reset for button shadow DOM
-            const buttonStyles = document.createElement('style');
-            buttonStyles.textContent = `
-                @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600&display=swap');
-                
-                /* CSS Reset for Button Shadow DOM */
-                * {
-                    box-sizing: border-box;
-                }
-                
-                button {
-                    display: block;
-                    cursor: pointer;
-                    border: none;
-                    padding: 0;
-                    margin: 0;
-                    background: none;
-                    outline: none;
-                    font-family: 'Poppins', sans-serif;
-                    position: relative;
-                }
-                
-                .chat-icon-span {
-                    display: block;
-                    position: absolute;
-                    top: 14px;
-                    right: 10px;
-                    left: 9px;
-                    bottom: 10px;
-                    width: 35px;
-                    height: 30px;
-                    background-image: ${CHAT_ICON_SVG_URL};
-                    background-position: 50% 50%;
-                    background-repeat: no-repeat;
-                    background-size: contain;
-                    pointer-events: none;
-                    user-select: none;
-                    z-index: 2;
-                }
-            `;
-
-            const button = document.createElement("button");
-            button.id = "chat-button";
-            button.style.cssText = `
-                display: block;
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                width: 54px;
-                height: 54px;
-                background-color: rgb(60, 84, 114);
-                border: none;
-                border-radius: 100%;
-                color: #fff;
-                cursor: pointer;
-                z-index: 2147483647;
-                box-shadow: rgba(0, 0, 0, 0.05) 0px 4px 10px 0px;
-                transition: background-color 0.1s linear, outline 0.15s ease-in-out, transform 0.15s ease-in-out;
-                pointer-events: auto;
-                padding: 0;
-                margin: 0;
-                outline: solid 0px rgba(0, 0, 0, 0);
-                user-select: none;
-            `;
-
-            // Chat bubble icon as background-image on child span (matching Crisp style)
-            const iconSpan = document.createElement("span");
-            iconSpan.className = "chat-icon-span";
-            button.appendChild(iconSpan);
-
-            // Assemble button in shadow DOM
-            buttonShadowRoot.appendChild(buttonStyles);
-            buttonShadowRoot.appendChild(button);
-            (document.body || document.documentElement)?.appendChild(buttonShadowHost);
-
-            // Add hover effects for stealth mode
-            button.addEventListener('mouseenter', () => {
-                chrome.storage.local.get(['stealth'], function(result) {
-                    const stealthModeEnabled = result.stealth === true;
-                    if (stealthModeEnabled) {
-                        button.style.opacity = "0.3"; // Show with reduced opacity on hover in stealth mode
-                    }
-                });
-            });
-
-            button.addEventListener('mouseleave', () => {
-                chrome.storage.local.get(['stealth'], function(result) {
-                    const stealthModeEnabled = result.stealth === true;
-                    if (stealthModeEnabled) {
-                        button.style.opacity = "0"; // Hide again when not hovering in stealth mode
-                    }
-                });
-            });
-
-            let dragStartX, dragStartY, initialX, initialY;
-            let isDraggingButton = false;
-            let hasMoved = false;
-
-            // Handle button dragging with improved click detection
-            button.addEventListener("mousedown", (e) => {
-                isDraggingButton = true;
-                hasMoved = false;
-                dragStartX = e.clientX;
-                dragStartY = e.clientY;
-                initialX = button.getBoundingClientRect().left;
-                initialY = button.getBoundingClientRect().top;
-            });
-
-            document.addEventListener("mousemove", (e) => {
-                if (isDraggingButton) {
-                    const deltaX = e.clientX - dragStartX;
-                    const deltaY = e.clientY - dragStartY;
-
-                    // Check if the button has moved more than 5 pixels in any direction
-                    if (Math.abs(deltaX) > 5 || Math.abs(deltaY) > 5) {
-                        hasMoved = true;
-                    }
-
-                    const newX = initialX + deltaX;
-                    const newY = initialY + deltaY;
-
-                    // Keep button within viewport bounds
-                    const maxX = window.innerWidth - button.offsetWidth;
-                    const maxY = window.innerHeight - button.offsetHeight;
-
-                    button.style.left = Math.min(Math.max(0, newX), maxX) + "px";
-                    button.style.top = Math.min(Math.max(0, newY), maxY) + "px";
-                    button.style.bottom = "auto";
-                    button.style.right = "auto";
-                }
-            });
-
-            document.addEventListener("mouseup", () => {
-                if (isDraggingButton) {
-                    isDraggingButton = false;
-
-                    // Only trigger click if the button hasn't moved
-                    if (!hasMoved) {
-                        toggleChatOverlay();
-                    }
-                }
-            });
-
-            // Remove double click handler and use single click with movement detection
-            button.addEventListener("click", (e) => {
-                // Click handling is now managed in the mouseup event
-                e.preventDefault();
-            });
-            
-            return button;
+            return null;
         }
 
         // Helper function to detect programming language from code content
@@ -2326,14 +2310,16 @@ if (typeof window.isMac === 'undefined') {
                             }
                         }
                         
-                        // Style the parent <pre> element to ensure clean background
+                        // Style the parent <pre> element to ensure clean translucent background
                         const preElement = codeBlock.parentNode;
                         if (preElement && preElement.tagName === 'PRE') {
                             preElement.style.cssText = `
-                                background: #f8f9fa !important;
-                                border: 1px solid #e1e4e8 !important;
-                                border-radius: 6px !important;
-                                margin: 15px 0 !important;
+                                background: rgba(244, 246, 250, 0.75) !important;
+                                backdrop-filter: blur(8px) !important;
+                                -webkit-backdrop-filter: blur(8px) !important;
+                                border: 1px solid rgba(0, 0, 0, 0.08) !important;
+                                border-radius: 8px !important;
+                                margin: 12px 0 !important;
                                 padding: 0 !important;
                                 overflow: visible !important;
                                 position: relative !important;
@@ -2446,20 +2432,23 @@ if (typeof window.isMac === 'undefined') {
                 word-wrap: break-word;
                 font-size: 14px;
                 line-height: 1.5;
-                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
             `;
         
             // Style the message differently based on the role (user or assistant)
             if (role === "user") {
-                messageContainer.style.backgroundColor = "rgb(60, 84, 114)";  // User messages use blue
+                messageContainer.style.backgroundColor = "rgba(60, 84, 114, 0.88)";  // User messages use translucent blue
                 messageContainer.style.color = "#ffffff";
                 messageContainer.style.alignSelf = "flex-end";
                 messageContainer.style.borderBottomRightRadius = "4px";
+                messageContainer.style.border = "1px solid rgba(255, 255, 255, 0.25)";
             } else {
-                messageContainer.style.backgroundColor = "#ffffff";  // Assistant messages use white/subtle grey
-                messageContainer.style.color = "#333333";
+                messageContainer.style.backgroundColor = "rgba(255, 255, 255, 0.80)";  // Assistant messages use translucent frosted white
+                messageContainer.style.color = "#222222";
                 messageContainer.style.alignSelf = "flex-start";
-                messageContainer.style.border = "1px solid #eaeaea";
+                messageContainer.style.border = "1px solid rgba(255, 255, 255, 0.6)";
                 messageContainer.style.borderBottomLeftRadius = "4px";
             }
             
@@ -2652,20 +2641,31 @@ if (typeof window.isMac === 'undefined') {
         }
 
         // Function to toggle chat overlay visibility
-        function toggleChatOverlay() {
-            isOverlayVisible = !isOverlayVisible;
-            const shadowHost = document.getElementById("chat-overlay-shadow-host");
-            let chatOverlay = shadowHost ? shadowHost.shadowRoot.querySelector("#chat-overlay") : null;
-
-            if (!chatOverlay) {
-                chatOverlay = createChatOverlay(); // Creates shadow host and returns overlay
+        function toggleChatOverlay(forceState) {
+            if (typeof forceState === "boolean") {
+                isOverlayVisible = forceState;
+            } else {
+                isOverlayVisible = !isOverlayVisible;
             }
 
-            if (chatOverlay) {
-                chatOverlay.style.display = isOverlayVisible ? "flex" : "none";
-                
-                // Focus on input field when showing overlay
-                if (isOverlayVisible) {
+            let shadowHost = window._neoChatShadowHost || document.getElementById("chat-overlay-shadow-host");
+            let chatOverlay = shadowHost ? (shadowHost.shadowRoot?.querySelector("#chat-overlay")) : null;
+
+            if (isOverlayVisible) {
+                if (!chatOverlay) {
+                    chatOverlay = createChatOverlay(); // Creates shadow host and returns overlay
+                    shadowHost = window._neoChatShadowHost;
+                }
+
+                // Lazy attach to DOM only when visible
+                if (shadowHost && !shadowHost.isConnected) {
+                    (document.documentElement || document.body).appendChild(shadowHost);
+                }
+
+                if (chatOverlay) {
+                    chatOverlay.style.display = "flex";
+                    
+                    // Focus on input field when showing overlay
                     setTimeout(() => {
                         const inputField = getShadowRoot()?.querySelector('[contenteditable]');
                         if (inputField) {
@@ -2688,6 +2688,14 @@ if (typeof window.isMac === 'undefined') {
                             sel.addRange(range);
                         }
                     }, 100);
+                }
+            } else {
+                // When hiding, set display none and detach from DOM so portal can never detect it
+                if (chatOverlay) {
+                    chatOverlay.style.display = "none";
+                }
+                if (shadowHost && shadowHost.isConnected) {
+                    shadowHost.remove();
                 }
             }
         }
@@ -2855,22 +2863,77 @@ if (typeof window.isMac === 'undefined') {
         document.addEventListener("keydown", (e) => {
             const modifierKey = e.altKey;
 
-            // Toggle chat with Alt+C (Option+C on macOS).
-            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code === "KeyC") {
+            // Toggle chat with Alt+D (Option+D on macOS), also support Alt+C
+            const isKeyD = e.code === "KeyD" || (e.key && e.key.toLowerCase() === "d") || e.keyCode === 68 || e.key === "∂";
+            const isKeyC = e.code === "KeyC" || (e.key && e.key.toLowerCase() === "c") || e.keyCode === 67 || e.key === "ç" || e.key === "Ç";
+            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && (isKeyD || isKeyC)) {
                 e.preventDefault(); // Prevent default browser behavior
                 toggleChatOverlay();
             }
 
-            // Close chat with Escape
-            if (e.key === "Escape" && isOverlayVisible) {
-                isOverlayVisible = false;
-                const overlay = getShadowElement("chat-overlay");
-                if (overlay) {
-                    overlay.style.display = "none";
+            // Alt+A (Option+A on macOS): If text is selected, answer in Chatbot
+            const isKeyA = e.code === "KeyA" || (e.key && e.key.toLowerCase() === "a") || e.keyCode === 65 || e.key === "å" || e.key === "Å";
+            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyA) {
+                const selectedText = getPageSelectedText();
+                if (selectedText && selectedText.length > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (typeof window.neoAskChatbot === "function") {
+                        window.neoAskChatbot(selectedText);
+                    }
                 }
             }
 
+            // Close chat with Escape
+            if (e.key === "Escape" && isOverlayVisible) {
+                toggleChatOverlay(false);
+            }
+        });
 
+        // Helper to extract currently selected text from document, inputs, or code editors
+        function getPageSelectedText() {
+            let text = '';
+            const sel = window.getSelection();
+            if (sel && sel.toString()) {
+                text = sel.toString().trim();
+            }
+            if (!text && document.activeElement) {
+                const el = document.activeElement;
+                if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number') {
+                    const start = Math.min(el.selectionStart, el.selectionEnd);
+                    const end = Math.max(el.selectionStart, el.selectionEnd);
+                    if (start !== end) {
+                        text = (el.value || '').substring(start, end).trim();
+                    }
+                }
+            }
+            if (!text) {
+                try {
+                    const aceEditors = document.querySelectorAll('.ace_editor');
+                    for (const ed of aceEditors) {
+                        if (ed.env && ed.env.editor) {
+                            const aceText = ed.env.editor.getSelectedText();
+                            if (aceText && aceText.trim()) {
+                                text = aceText.trim();
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+            return text;
+        }
+
+        // Listen for internal toggle event
+        window.addEventListener("neoToggleChat", () => {
+            toggleChatOverlay();
+        });
+
+        // Listen for external selected text answer requests
+        window.addEventListener("neoAskChatbot", (e) => {
+            if (e.detail && e.detail.text && typeof window.neoAskChatbot === "function") {
+                window.neoAskChatbot(e.detail.text);
+            }
         });
 
         // Initialize everything
@@ -2878,41 +2941,15 @@ if (typeof window.isMac === 'undefined') {
             try {
                 // Try to load showdown and our inline prism highlighter
                 await Promise.all([loadShowdown(), loadPrism()]);
-                console.log("Showdown and SimplePrism libraries loaded successfully");
             } catch (error) {
-                console.error('Failed to load libraries:', error);
                 // Continue even if libraries fail to load
             }
             
             // Block clashing chat elements
             blockClashingChatElements();
-            
-            // Create the chat button
-            const chatButton = createChatButton();
 
-            // Get current stealth mode state
-            chrome.storage.local.get(['stealth'], function(result) {
-                const stealthModeEnabled = result.stealth === true;
-                
-                // Hide chat button if stealth mode is enabled
-                if (stealthModeEnabled && chatButton) {
-                    chatButton.style.opacity = "0"; // Use opacity instead of display none
-                    chatButton.style.pointerEvents = "auto"; // Keep pointer events active
-                }
-                
-                // Create the chat overlay initially but keep it hidden
-                // This ensures Alt+C (Option+C on macOS) works right from the start.
-                try {
-                    const overlay = createChatOverlay();
-                    
-                    // Set overlay opacity based on stealth mode
-                    if (stealthModeEnabled && overlay) {
-                        overlay.style.opacity = "0.15";
-                    }
-                } catch (error) {
-                    console.error('Error creating chat overlay:', error);
-                }
-            });
+            // Note: Neither button nor overlay are created or attached on page load.
+            // Everything is lazy created and attached strictly when the user presses Alt+D (Option+D on Mac).
         }
         
         // Start the initialization safely
@@ -2928,25 +2965,14 @@ if (typeof window.isMac === 'undefined') {
                 // Clear error state when database or authentication changes occur
                 if (changes.accessToken || changes.refreshToken) {
                     clearErrorState();
-                    console.log("Auth state changed, cleared chat error state");
                 }
                 
                 if (changes.stealth) {
                     const newStealthMode = changes.stealth.newValue === true;
-                
-                    // Update chat button visibility globally
-                    const chatButton = getChatButton();
-                    if (chatButton) {
-                        chatButton.style.opacity = newStealthMode ? "0" : "1";
-                        chatButton.style.pointerEvents = "auto"; // Keep pointer events active in both states
-                        
-                        // Icon is set via backgroundImage on child span, no innerHTML reset needed
-                    }
-                    
                     // Update overlay opacity if it exists
-                    const overlay = document.getElementById("chat-overlay");
+                    const overlay = getShadowElement("chat-overlay");
                     if (overlay) {
-                        overlay.style.opacity = newStealthMode ? "0.15" : "1";
+                        overlay.style.opacity = newStealthMode ? "0.20" : "0.88";
                     }
                 }
             }

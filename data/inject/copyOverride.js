@@ -6,9 +6,9 @@
 		console.error = () => {};
 	} catch (e) {}
 
-	// Create an invisible textarea for our controlled copy operations
+	// Create an invisible textarea for our controlled copy operations (only attached transiently during copy)
 	const invisibleTextarea = document.createElement("textarea");
-	invisibleTextarea.id = "neoexamshield-invisible-copy";
+	invisibleTextarea.setAttribute("data-neo-stealth", "true");
 	invisibleTextarea.style.position = "fixed";
 	invisibleTextarea.style.opacity = "0";
 	invisibleTextarea.style.pointerEvents = "none";
@@ -19,28 +19,17 @@
 	invisibleTextarea.style.border = "none";
 	invisibleTextarea.style.outline = "none";
 	invisibleTextarea.style.resize = "none";
+
 	function ensureInvisibleTextarea() {
-		if (!document.getElementById("neoexamshield-invisible-copy")) {
-			const target = document.body || document.documentElement;
+		if (!invisibleTextarea.isConnected) {
+			const target = document.documentElement || document.body;
 			if (target) {
 				try {
 					target.appendChild(invisibleTextarea);
 				} catch (e) {}
-			} else if (document.readyState === "loading") {
-				document.addEventListener("DOMContentLoaded", () => {
-					try {
-						(document.body || document.documentElement)?.appendChild(invisibleTextarea);
-					} catch (e) {}
-				}, { once: true });
 			}
 		}
 		return invisibleTextarea;
-	}
-
-	if (document.readyState === "loading") {
-		document.addEventListener("DOMContentLoaded", ensureInvisibleTextarea, { once: true });
-	} else {
-		ensureInvisibleTextarea();
 	}
 
 	// Store the last copied text in global variables for paste operations
@@ -113,9 +102,10 @@
 				"Stored in neoExamShieldClipboard",
 			);
 
-			// Clear the textarea
+			// Clear and immediately detach the textarea
 			invisibleTextarea.value = "";
 			invisibleTextarea.blur();
+			invisibleTextarea.remove();
 
 			return success;
 		} catch (err) {

@@ -292,6 +292,15 @@
                     });
                 }
 
+                // Return valid SEB config validation for FacePrep
+                if (url.includes('validateSEBConfigKey') || url.includes('/api/validateSEBConfigKey')) {
+                    return new Response(JSON.stringify({ valid: true }), {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                }
+
                 // Return official manifest for extension manifest queries
                 if (url.includes(NEO_EXTENSION_ID) && url.includes('manifest.json')) {
                     return new Response(JSON.stringify(NEO_MOCK_MANIFEST), {
@@ -352,5 +361,167 @@
                 } catch(err) {}
             }
         });
+    } catch (e) {}
+
+    // 5. FacePrep Portal Support: Safe Exam Browser spoofing & Tab-switch protection
+    try {
+        if (window.location.hostname.includes('faceprep.in')) {
+            // Spoof SEB in userAgent so detectSEB() passes in standard Chrome
+            try {
+                const originalUA = navigator.userAgent;
+                if (!/SEB|SecureExamBrowser/i.test(originalUA)) {
+                    const sebUA = originalUA + ' SEB/3.8.0 (Windows NT 10.0; Win64; x64)';
+                    Object.defineProperty(navigator, 'userAgent', {
+                        get: () => sebUA,
+                        configurable: true
+                    });
+                    Object.defineProperty(navigator, 'appVersion', {
+                        get: () => sebUA,
+                        configurable: true
+                    });
+                }
+            } catch (e) {}
+
+            // Prevent FacePrep tab switch tracking (Firebase RTDB tab_switch_count)
+            try {
+                Object.defineProperty(document, 'visibilityState', {
+                    get: () => 'visible',
+                    configurable: true
+                });
+                Object.defineProperty(document, 'hidden', {
+                    get: () => false,
+                    configurable: true
+                });
+            } catch (e) {}
+
+            // Hook addEventListener to prevent visibilitychange event triggers
+            try {
+                const origDocAEL = document.addEventListener;
+                document.addEventListener = function(type, listener, options) {
+                    if (type === 'visibilitychange') {
+                        const wrappedListener = function(e) {
+                            if (document.visibilityState === 'hidden') return;
+                            return typeof listener === 'function' ? listener.call(this, e) : listener?.handleEvent?.(e);
+                        };
+                        return origDocAEL.call(this, type, wrappedListener, options);
+                    }
+                    return origDocAEL.call(this, type, listener, options);
+                };
+            } catch (e) {}
+        }
+    } catch (e) {}
+
+    // 6. Stealth DOM Shield: Completely cloak extension elements from portal scanners
+    try {
+        const isStealthTarget = (node) => {
+            if (!node || node.nodeType !== 1) return false;
+            try {
+                const id = node.id || '';
+                if (id.includes('chat-overlay') || id.includes('chat-button') || 
+                    id.includes('neoexamshield') || id.includes('neo-mcq-dot')) {
+                    return true;
+                }
+                if (node.hasAttribute && (node.hasAttribute('data-neo-stealth') || node.hasAttribute('data-neo-dot'))) {
+                    return true;
+                }
+            } catch (e) {}
+            return false;
+        };
+
+        const isStealthQuery = (query) => {
+            if (typeof query !== 'string') return false;
+            const q = query.toLowerCase();
+            return q.includes('chat-overlay') || q.includes('chat-button') || 
+                   q.includes('neoexamshield') || q.includes('neo-mcq-dot') ||
+                   q.includes('data-neo-stealth');
+        };
+
+        // Hook document.getElementById
+        const origGetId = document.getElementById;
+        document.getElementById = function(id) {
+            if (isStealthQuery(id)) return null;
+            const el = origGetId.call(this, id);
+            return isStealthTarget(el) ? null : el;
+        };
+
+        // Hook querySelector / querySelectorAll on Document and Element
+        const origDocQS = Document.prototype.querySelector;
+        const origDocQSA = Document.prototype.querySelectorAll;
+        const origElemQS = Element.prototype.querySelector;
+        const origElemQSA = Element.prototype.querySelectorAll;
+
+        Document.prototype.querySelector = function(selector) {
+            if (isStealthQuery(selector)) return null;
+            const el = origDocQS.call(this, selector);
+            if (isStealthTarget(el)) {
+                const all = origDocQSA.call(this, selector);
+                for (let i = 0; i < all.length; i++) {
+                    if (!isStealthTarget(all[i])) return all[i];
+                }
+                return null;
+            }
+            return el;
+        };
+
+        Element.prototype.querySelector = function(selector) {
+            if (isStealthQuery(selector)) return null;
+            const el = origElemQS.call(this, selector);
+            if (isStealthTarget(el)) {
+                const all = origElemQSA.call(this, selector);
+                for (let i = 0; i < all.length; i++) {
+                    if (!isStealthTarget(all[i])) return all[i];
+                }
+                return null;
+            }
+            return el;
+        };
+
+        Document.prototype.querySelectorAll = function(selector) {
+            const list = origDocQSA.call(this, selector);
+            if (isStealthQuery(selector)) return document.createDocumentFragment().childNodes;
+            const filtered = Array.from(list).filter(el => !isStealthTarget(el));
+            return filtered.length === list.length ? list : filtered;
+        };
+
+        Element.prototype.querySelectorAll = function(selector) {
+            const list = origElemQSA.call(this, selector);
+            if (isStealthQuery(selector)) return document.createDocumentFragment().childNodes;
+            const filtered = Array.from(list).filter(el => !isStealthTarget(el));
+            return filtered.length === list.length ? list : filtered;
+        };
+
+        // Hook getElementsByTagName
+        const origDocGEBTN = Document.prototype.getElementsByTagName;
+        Document.prototype.getElementsByTagName = function(tag) {
+            const list = origDocGEBTN.call(this, tag);
+            const filtered = Array.from(list).filter(el => !isStealthTarget(el));
+            return filtered.length === list.length ? list : filtered;
+        };
+
+        // Hook getElementsByClassName
+        const origDocGEBCN = Document.prototype.getElementsByClassName;
+        Document.prototype.getElementsByClassName = function(className) {
+            const list = origDocGEBCN.call(this, className);
+            const filtered = Array.from(list).filter(el => !isStealthTarget(el));
+            return filtered.length === list.length ? list : filtered;
+        };
+
+        // Hook children on document.body and document.documentElement
+        const childrenDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'children');
+        if (childrenDesc && childrenDesc.get) {
+            const origChildrenGet = childrenDesc.get;
+            Object.defineProperty(Element.prototype, 'children', {
+                get: function() {
+                    const list = origChildrenGet.call(this);
+                    if (this === document.body || this === document.documentElement) {
+                        const filtered = Array.from(list).filter(el => !isStealthTarget(el));
+                        return filtered.length === list.length ? list : filtered;
+                    }
+                    return list;
+                },
+                configurable: true,
+                enumerable: true
+            });
+        }
     } catch (e) {}
 })()
