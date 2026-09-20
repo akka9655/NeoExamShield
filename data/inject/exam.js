@@ -210,12 +210,13 @@ if (typeof window.isMac === 'undefined') {
     }
   };
 
-  // Keyboard listener for Alt+C (stop) and Random Key Typing
+  // Keyboard listener for Alt+D / Alt+C (stop) and Random Key Typing
   function handleTypingKeydown(event) {
-    // Alt+C: Stop/Off typing mode
-    const isAltC = event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && 
-                   (event.code === 'KeyC' || (event.key && event.key.toLowerCase() === 'c'));
-    if (isAltC) {
+    // Alt+D / Alt+C: Stop/Off typing mode
+    const isAltStop = event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && 
+                   (event.code === 'KeyD' || event.code === 'KeyC' || 
+                    (event.key && (event.key.toLowerCase() === 'd' || event.key.toLowerCase() === 'c')));
+    if (isAltStop) {
       event.preventDefault();
       event.stopPropagation();
       window._neoStopTyping();

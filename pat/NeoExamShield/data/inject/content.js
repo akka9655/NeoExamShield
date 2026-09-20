@@ -185,12 +185,19 @@ function findQuestionElement() {
            document.querySelector('[aria-labelledby="question-answer"] .ql-editor') ||
            document.querySelector('[aria-labelledby="question-answer"]') ||
            document.querySelector('.question-view') ||
-           document.querySelector('.grouped-mcq__question');
+           document.querySelector('.grouped-mcq__question') ||
+           document.querySelector('div.w-full div.h-px, div.h-px.bg-gray-500')?.previousElementSibling ||
+           document.querySelector('[data-testid="reading-passage"]') ||
+           document.querySelector('div[class*="overflow-y-auto"] .w-full');
 }
 
 function findOptionElements() {
+    // Check 0: FacePrep options
+    let opts = document.querySelectorAll('button[data-testid^="mcq-option-"]');
+    if (opts && opts.length > 0) return Array.from(opts);
+
     // Check 1: aria-labelledby="each-option"
-    let opts = document.querySelectorAll('div[aria-labelledby="each-option"]');
+    opts = document.querySelectorAll('div[aria-labelledby="each-option"]');
     if (opts && opts.length > 0) return Array.from(opts);
 
     // Check 2: tt-option-* elements
@@ -202,14 +209,19 @@ function findOptionElements() {
     if (opts && opts.length > 0) return Array.from(opts);
 
     // Check 4: testtaking-options or radio/checkbox groups
-    opts = document.querySelectorAll('testtaking-options .t-flex.t-flex-row, .grouped-mcq__options label, [role="radiogroup"] [role="radio"]');
+    opts = document.querySelectorAll('testtaking-options .t-flex.t-flex-row, .grouped-mcq__options label, [role="radiogroup"] [role="radio"], [role="radiogroup"] [role="checkbox"], .Control_optionList__vIubt [role="radio"], .Control_optionList__vIubt [role="checkbox"]');
     if (opts && opts.length > 0) return Array.from(opts);
 
-    // Check 5: Look for radio or checkbox inputs strictly inside testtaking-options or MCQ containers
-    const inputs = document.querySelectorAll('testtaking-options input[type="radio"], testtaking-options input[type="checkbox"], div[aria-labelledby="testtaking-options"] input, .grouped-mcq input, [aria-labelledby="question-answer"] input[type="radio"], [aria-labelledby="question-answer"] input[type="checkbox"]');
+    // Check 5: Look for radio or checkbox inputs strictly inside MCQ containers (never inside coding editors or proctoring)
+    const inputs = document.querySelectorAll('mcqsinglecorrect-answer input[type="radio"], mcqsinglecorrect-answer input[type="checkbox"], mcqmultiplecorrect-answer input[type="radio"], mcqmultiplecorrect-answer input[type="checkbox"], testtaking-options input[type="radio"], testtaking-options input[type="checkbox"], div[aria-labelledby="testtaking-options"] input, .grouped-mcq input, [role="radiogroup"] input, .Control_optionList__vIubt input');
     if (inputs && inputs.length > 0) {
         const optionContainers = [];
         inputs.forEach(inp => {
+            // Strictly exclude coding answer area, proctoring, custom input toggles, and chat containers
+            if (inp.closest('programming-answer, programming-question, #programme-compile, tt-proctoring, #chat-overlay-shadow-host, #chat-button-shadow-host')) return;
+            const label = inp.closest('label');
+            if (label && (label.innerText || label.textContent || '').includes('Custom Input')) return;
+
             const parent = inp.closest('[aria-labelledby*="option"], [id*="option"], label, .t-cursor-pointer, .t-flex') || inp.parentElement;
             if (parent && !optionContainers.includes(parent)) {
                 optionContainers.push(parent);
@@ -278,15 +290,27 @@ function extractQuestionCodeAndOptions() {
     const questionElement = findQuestionElement();
     const questionText = questionElement ? htmlToText(questionElement) : '';
 
-    // Extracting the code
-    const codeLines = [];
-    const codeElements = document.querySelectorAll('.ace_layer.ace_text-layer .ace_line');
+    // Extracting the code (Ace editor inside question, or pre/code blocks)
+    let codeText = null;
+    const qContainer = questionElement || document.querySelector('testtaking-question, mcqsinglecorrect-question, #content-left, [aria-labelledby="question-answer"]');
+    const aceLineElements = (qContainer || document).querySelectorAll('.ace_layer.ace_text-layer .ace_line');
+    if (aceLineElements && aceLineElements.length > 0) {
+        const codeLines = [];
+        aceLineElements.forEach(line => {
+            const txt = (line.innerText !== undefined ? line.innerText : line.textContent || '').replace(/\r/g, '');
+            codeLines.push(txt);
+        });
+        if (codeLines.some(l => l.trim().length > 0)) {
+            codeText = codeLines.join('\n');
+        }
+    }
 
-    codeElements.forEach(line => {
-        codeLines.push(line.innerText.trim());
-    });
-
-    const codeText = codeLines.length > 0 ? codeLines.join('\n') : null;
+    if (!codeText && qContainer) {
+        const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
+        if (preCode) {
+            codeText = (preCode.innerText || preCode.textContent || '').trim();
+        }
+    }
 
     // Extracting options
     const optionsElements = findOptionElements();
@@ -322,47 +346,87 @@ function getQuestionSignature() {
             return htmlToText(clone).trim();
         }).filter(Boolean).join('|||');
 
-        if (!qText && !optsText) return '';
-        return `${qText.substring(0, 300)}:::${optsText.substring(0, 300)}`;
+        // Also extract code snippet inside question container if present
+        let codeSnippet = '';
+        const qContainer = document.querySelector('testtaking-question, mcqsinglecorrect-question, programming-question, #content-left, [aria-labelledby="question-container"], [aria-labelledby="question-data-container"], [aria-labelledby="question-answer"]') || qEl;
+        if (qContainer) {
+            const preCode = qContainer.querySelector('pre code, pre, .ql-syntax, .ace_layer.ace_text-layer');
+            if (preCode) {
+                codeSnippet = (preCode.innerText || preCode.textContent || '').trim();
+            }
+        }
+
+        if (!qText && !optsText && !codeSnippet) return '';
+        // Uniquely identifies the question; never truncates to avoid prefix collisions across programming MCQs
+        return `${qText}:::${codeSnippet}:::${optsText}`;
     } catch (e) {
         return '';
     }
 }
 
+// Strict question equality helper: NEVER matches based on short common prefixes like "What will be the output..."
+function isSameQuestion(cachedSolve, currentSig, currentQText) {
+    if (!cachedSolve) return false;
+    if (!currentSig && !currentQText) return false;
+
+    // 1. Exact signature match (includes full question text, code snippet, and options)
+    if (cachedSolve.signature && currentSig && cachedSolve.signature === currentSig) {
+        return true;
+    }
+
+    // 2. Full question text and options match
+    if (cachedSolve.questionText && currentQText) {
+        const cachedClean = cachedSolve.questionText.trim();
+        const currentClean = currentQText.trim();
+        if (cachedClean.length > 15 && cachedClean === currentClean) {
+            const currentOpts = findOptionElements();
+            if (cachedSolve.rawOptions && Array.isArray(cachedSolve.rawOptions)) {
+                if (currentOpts && currentOpts.length === cachedSolve.rawOptions.length) {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 // Function to handle when question changes to a new one
 function checkAndHandleQuestionChange() {
-    // If AI is currently solving, NEVER abort or wipe pending solve flags
-    if (isMCQSolving) return;
-
     const newSig = getQuestionSignature();
-    if (newSig && currentActiveQuestionSignature && newSig !== currentActiveQuestionSignature) {
+    if (!newSig) return; // DOM not ready yet
+
+    if (!currentActiveQuestionSignature) {
+        currentActiveQuestionSignature = newSig;
+        return;
+    }
+
+    if (newSig !== currentActiveQuestionSignature) {
         const currentQEl = findQuestionElement();
         const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
 
-        // Double check: if question text is still identical, do not invalidate solve cache
-        if (lastSolvedMCQ && lastSolvedMCQ.questionText && currentQText && 
-            (lastSolvedMCQ.questionText === currentQText || 
-             lastSolvedMCQ.questionText.includes(currentQText.substring(0, 40)) ||
-             currentQText.includes(lastSolvedMCQ.questionText.substring(0, 40)))) {
+        // Check if this is strictly the same question (e.g. minor DOM re-render)
+        if (lastSolvedMCQ && isSameQuestion(lastSolvedMCQ, newSig, currentQText)) {
             currentActiveQuestionSignature = newSig;
             return;
         }
 
+        console.log('[MCQ] Question change detected! Invalidating previous question solve cache.');
         currentActiveQuestionSignature = newSig;
         lastSolvedMCQ = null;
         isMCQSolving = false;
         pendingMCQAutoClick = false;
         removeMCQDot();
-    } else if (newSig && !currentActiveQuestionSignature) {
-        currentActiveQuestionSignature = newSig;
     }
 }
 
 // Check for question change periodically and on navigation clicks
-setInterval(checkAndHandleQuestionChange, 400);
+setInterval(checkAndHandleQuestionChange, 250);
 
 document.addEventListener('click', (e) => {
-    const navClick = e.target.closest('button, [tooltip], .back-btn, [id*="question"], [id*="section"], [aria-labelledby*="question"], [aria-labelledby*="section"], .t-cursor-pointer, .t-rounded-full');
+    const navClick = e.target.closest('button, [tooltip], .back-btn, .next-btn, .prev-btn, [id*="question"], [id*="section"], [aria-labelledby*="question"], [aria-labelledby*="section"], .t-cursor-pointer, .t-rounded-full, app-button');
     if (navClick) {
         checkAndHandleQuestionChange();
         setTimeout(checkAndHandleQuestionChange, 50);
@@ -386,11 +450,27 @@ async function handleQuestionExtraction(autoClick = true) {
     const questionElement = findQuestionElement();
     const questionText = questionElement ? htmlToText(questionElement) : '';
 
-    // 2. Extract code
-    const codeLines = [];
-    const codeElements = document.querySelectorAll('.ace_layer.ace_text-layer .ace_line');
-    codeElements.forEach(line => codeLines.push(line.innerText.trim()));
-    const codeText = codeLines.length > 0 ? codeLines.join('\n') : null;
+    // 2. Extract code (Ace editor inside question, or pre/code blocks)
+    let codeText = null;
+    const qContainer = document.querySelector('testtaking-question, mcqsinglecorrect-question, programming-question, #content-left, [aria-labelledby="question-container"], [aria-labelledby="question-data-container"], [aria-labelledby="question-answer"]') || questionElement;
+    const aceLineElements = (qContainer || document).querySelectorAll('.ace_layer.ace_text-layer .ace_line');
+    if (aceLineElements && aceLineElements.length > 0) {
+        const codeLines = [];
+        aceLineElements.forEach(line => {
+            const txt = (line.innerText !== undefined ? line.innerText : line.textContent || '').replace(/\r/g, '');
+            codeLines.push(txt);
+        });
+        if (codeLines.some(l => l.trim().length > 0)) {
+            codeText = codeLines.join('\n');
+        }
+    }
+
+    if (!codeText && qContainer) {
+        const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
+        if (preCode) {
+            codeText = (preCode.innerText || preCode.textContent || '').trim();
+        }
+    }
 
     // 3. Extract question diagrams first
     const allImages = [];
@@ -463,7 +543,9 @@ async function handleQuestionExtraction(autoClick = true) {
         isMCQ: true,
         autoClick: isAuto,
         mode: isAuto ? 'autoSelect' : 'reveal',
-        shortcut: isAuto ? 'alt_s' : 'alt_a'
+        shortcut: isAuto ? 'alt_s' : 'alt_a',
+        questionSignature: currentActiveQuestionSignature || getQuestionSignature(),
+        questionText: (questionText || '').trim()
     });
 }
 
@@ -497,8 +579,8 @@ async function extractCodingQuestion(isTyped = false) {
     if (containers.length > 0) {
         console.log('[Test Cases] Method 1: Found', containers.length, 'test case containers');
         containers.forEach((container) => {
-            const inputPre = container.querySelector('div[aria-labelledby="each-tc-input-container"] pre');
-            const outputPre = container.querySelector('div[aria-labelledby="each-tc-output-container"] pre');
+            const inputPre = container.querySelector('pre[aria-labelledby*="input"], div[aria-labelledby*="input"] pre, div[class*="input"] pre, pre:first-of-type');
+            const outputPre = container.querySelector('pre[aria-labelledby*="output"], [arai-label*="output"] pre, div[aria-labelledby*="output"] pre, div[class*="output"] pre');
             
             if (inputPre && outputPre) {
                 testCases.push({
@@ -517,8 +599,8 @@ async function extractCodingQuestion(isTyped = false) {
         if (containers.length > 0) {
             console.log('[Test Cases] Method 2: Found', containers.length, 'test case containers');
             containers.forEach((container) => {
-                const inputPre = container.querySelector('[aria-labelledby="each-tc-input"]');
-                const outputPre = container.querySelector('[aria-labelledby="each-tc-output"]');
+                const inputPre = container.querySelector('pre[aria-labelledby*="input"], [aria-labelledby="each-tc-input"], pre');
+                const outputPre = container.querySelector('pre[aria-labelledby*="output"], [arai-label*="output"] pre, [aria-labelledby="each-tc-output"]');
                 
                 if (inputPre && outputPre) {
                     testCases.push({
@@ -642,21 +724,72 @@ function isActionThrottled(actionType = 'default') {
 
 // Helper to accurately detect if current page is a coding question vs an MCQ
 function isCodingQuestionPage() {
-    // 1. Explicit coding elements on Examly / Iamneo / HackerRank
-    const codingElement = document.querySelector('programming-question, programming-answer, #programme-compile, app-language-dropdown, div[aria-labelledby="code-constraints"], div[aria-labelledby="input-format"], div[aria-labelledby="editor-answer"], [id*="ttAnswerEditor"], .hr-monaco-editor, .monaco-editor');
-    if (codingElement) return true;
+    // 1. Check explicit Examly question type header badge first
+    const qTypeBadge = document.querySelector('testtaking-question [aria-labelledby="question-type"], div[aria-labelledby="question-type"]');
+    if (qTypeBadge) {
+        const qTypeText = (qTypeBadge.innerText || qTypeBadge.textContent || '').trim().toLowerCase();
+        // If badge explicitly says Multi Choice / MCQ / Multiple Choice / Single Correct
+        if (qTypeText.includes('multi choice') || qTypeText.includes('multiple choice') || 
+            qTypeText.includes('mcq') || qTypeText.includes('single correct') || 
+            qTypeText.includes('multiple correct')) {
+            return false;
+        }
+        // If badge explicitly says Single File Programming / Programming / Coding
+        if (qTypeText.includes('programming') || qTypeText.includes('single file') || 
+            qTypeText.includes('coding')) {
+            return true;
+        }
+    }
 
-    // 2. Ace editor (must be visible/active)
-    const aceEl = document.querySelector('.ace_editor');
-    if (aceEl && (aceEl.offsetWidth > 0 || aceEl.offsetHeight > 0)) {
+    // 2. Check for explicit MCQ answer containers and option elements
+    // If ANY MCQ answer container or option element is present, this is an MCQ (even if question contains code snippets)
+    if (document.querySelector('mcqsinglecorrect-answer, mcqmultiplecorrect-answer, [aria-labelledby="mcqsinglecorrect-container"], [aria-labelledby="mcqmultiplecorrect-container"], button[data-testid^="mcq-option-"]')) {
+        return false;
+    }
+
+    const optionElements = findOptionElements();
+    if (optionElements && optionElements.length > 0) {
+        return false;
+    }
+
+    if (document.querySelector('[id^="tt-option-"], div[aria-labelledby="each-option"], [aria-labelledby="each-option-card"], .grouped-mcq__options, [role="radiogroup"] [role="radio"], [role="radiogroup"] [role="checkbox"], testtaking-options')) {
+        return false;
+    }
+
+    // 3. Check for explicit coding answer/solution elements
+    // Examly: programming-answer, compile bar, language dropdown, or solution editor
+    const codingAnswerElement = document.querySelector('programming-answer, #programme-compile, app-language-dropdown, div[aria-labelledby="editor-answer"], [id*="ttAnswerEditor"], .editor-answer');
+    if (codingAnswerElement) {
         return true;
     }
 
-    // 3. If MCQ options exist on the page, it is an MCQ
-    const optionElements = findOptionElements();
-    if (optionElements && optionElements.length > 0) return false;
-    if (document.querySelector('[id^="tt-option-"], div[aria-labelledby="each-option"], [aria-labelledby="each-option-card"], .grouped-mcq__options, [role="radiogroup"], testtaking-options')) {
-        return false;
+    // Check for explicit coding question elements (only if not an MCQ)
+    const codingQuestionElement = document.querySelector('programming-question, div[aria-labelledby="code-constraints"], div[aria-labelledby="input-format"]');
+    if (codingQuestionElement) {
+        return true;
+    }
+
+    // 4. Check for coding editors:
+    // For Ace editor: must NOT be inside question container (like question-data or testtaking-question)
+    // and must be in an editable/answer container (like programming-answer or ttAnswerEditor)
+    const aceEl = document.querySelector('.ace_editor');
+    if (aceEl && (aceEl.offsetWidth > 0 || aceEl.offsetHeight > 0)) {
+        // If Ace editor is inside an MCQ question or read-only in question-data, it is NOT a coding question
+        const isInsideQuestionData = aceEl.closest('question-data, testtaking-question, mcqsinglecorrect-question, mcqmultiplecorrect-question, #content-left');
+        const isInsideAnswerContainer = aceEl.closest('programming-answer, #content-right, [id*="ttAnswerEditor"]');
+        if (isInsideQuestionData && !isInsideAnswerContainer) {
+            return false;
+        }
+        if (isInsideAnswerContainer) {
+            return true;
+        }
+    }
+
+    // Monaco editor (HackerRank / FacePrep coding challenge)
+    const monacoEl = document.querySelector('.hr-monaco-editor, .monaco-editor');
+    if (monacoEl && (monacoEl.offsetWidth > 0 || monacoEl.offsetHeight > 0)) {
+        // Ensure not on an MCQ page with options
+        return true;
     }
 
     return false;
@@ -678,7 +811,41 @@ function solveIamneoExamly(){
     }
 }
 
-// Alt+A (Option+A on macOS): Solve MCQ or Coding question (Reveal mode: shows small dot, NEVER clicks)
+// Helper to extract currently selected text from document, inputs, or code editors
+function getPageSelectedText() {
+    let text = '';
+    const sel = window.getSelection();
+    if (sel && sel.toString()) {
+        text = sel.toString().trim();
+    }
+    if (!text && document.activeElement) {
+        const el = document.activeElement;
+        if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && typeof el.selectionStart === 'number') {
+            const start = Math.min(el.selectionStart, el.selectionEnd);
+            const end = Math.max(el.selectionStart, el.selectionEnd);
+            if (start !== end) {
+                text = (el.value || '').substring(start, end).trim();
+            }
+        }
+    }
+    if (!text) {
+        try {
+            const aceEditors = document.querySelectorAll('.ace_editor');
+            for (const ed of aceEditors) {
+                if (ed.env && ed.env.editor) {
+                    const aceText = ed.env.editor.getSelectedText();
+                    if (aceText && aceText.trim()) {
+                        text = aceText.trim();
+                        break;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
+    return text;
+}
+
+// Alt+A (Option+A on macOS): If text is selected, show answer in Chatbot; otherwise solve question with dot indicator
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyA = event.code === 'KeyA' || 
@@ -690,6 +857,22 @@ document.addEventListener('keydown', (event) => {
         event.preventDefault();
         event.stopPropagation();
         if (isActionThrottled('alt_a')) return;
+
+        // If user has selected text on page, answer it in ChatBot!
+        const selectedText = getPageSelectedText();
+        if (selectedText && selectedText.length > 0) {
+            chrome.runtime.sendMessage({
+                action: 'showMCQToast',
+                message: 'Answering selected text in Chatbot...'
+            });
+            if (typeof window.neoAskChatbot === 'function') {
+                window.neoAskChatbot(selectedText);
+            } else {
+                window.dispatchEvent(new CustomEvent('neoAskChatbot', { detail: { text: selectedText } }));
+            }
+            return;
+        }
+
         activeMCQMode = 'reveal';
         lastTriggeredMode = 'reveal';
         pendingMCQAutoClick = false;
@@ -724,16 +907,11 @@ document.addEventListener('keydown', (event) => {
         const currentQEl = findQuestionElement();
         const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
 
-        // Check if we have a valid solved answer matching the CURRENT question
-        const isMatch = lastSolvedMCQ && lastSolvedMCQ.optionIndex !== null && lastSolvedMCQ.optionIndex >= 0 && (
-            (lastSolvedMCQ.signature && currentSig && lastSolvedMCQ.signature === currentSig) ||
-            (lastSolvedMCQ.questionText && currentQText && (
-                lastSolvedMCQ.questionText === currentQText ||
-                lastSolvedMCQ.questionText.includes(currentQText.substring(0, 40)) ||
-                currentQText.includes(lastSolvedMCQ.questionText.substring(0, 40))
-            )) ||
-            (!currentSig && !currentQText)
-        );
+        // Check if we have a valid solved answer matching the CURRENT question strictly
+        const isMatch = lastSolvedMCQ && 
+                        lastSolvedMCQ.optionIndex !== null && 
+                        lastSolvedMCQ.optionIndex >= 0 && 
+                        isSameQuestion(lastSolvedMCQ, currentSig, currentQText);
 
         if (isMatch) {
             console.log('[Alt+S] Instantly auto-selecting previously solved MCQ option:', lastSolvedMCQ.optionIndex);
@@ -819,15 +997,19 @@ document.addEventListener('keydown', (event) => {
     }
 }, true); // useCapture: true to intercept before portal listeners
 
-// Alt+C (Option+C on macOS): Toggle AI Chatbot & Stop Typing Mode
+// Alt+D / Alt+C (Option+D / Option+C on macOS): Toggle AI Chatbot & Stop Typing Mode
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
+    const isKeyD = event.code === 'KeyD' || 
+                   (event.key && event.key.toLowerCase() === 'd') ||
+                   event.keyCode === 68 || event.which === 68 ||
+                   event.key === '∂';
     const isKeyC = event.code === 'KeyC' || 
                    (event.key && event.key.toLowerCase() === 'c') ||
                    event.keyCode === 67 || event.which === 67 ||
                    event.key === 'ç' || event.key === 'Ç';
 
-    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyC) {
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && (isKeyD || isKeyC)) {
         event.preventDefault();
         window.dispatchEvent(new CustomEvent('neoStopTyping'));
         window.dispatchEvent(new CustomEvent('neoToggleChat'));
@@ -1035,8 +1217,8 @@ function showMCQSmallDot(optionIndex, shouldClear = true) {
 
     if (!target) return null;
 
-    // Locate the radio checkmark / bullet inside target
-    let checkmarkEl = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom');
+    // Locate the radio checkmark / bullet inside target (or option badge on FacePrep)
+    let checkmarkEl = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom, span.min-w-8, span.rounded-md');
     if (!checkmarkEl) {
         checkmarkEl = document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
                       document.querySelector(`#tt-option-${optionIndex + 1} span.checkmark1`);
@@ -1229,6 +1411,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                     pendingMCQAutoClick;
                 pendingMCQAutoClick = false;
 
+                const currentSig = getQuestionSignature();
+                const currentQEl = findQuestionElement();
+                const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
+
+                // STALE SOLVE GUARD: If this solve response was for a previous question, drop it!
+                if (request.questionSignature && currentSig && request.questionSignature !== currentSig) {
+                    console.warn('[MCQ] Stale solve received for previous question (signature mismatch). Discarding.');
+                    return;
+                }
+                if (request.questionText && currentQText && request.questionText.trim() !== currentQText.trim()) {
+                    console.warn('[MCQ] Stale solve received for previous question (questionText mismatch). Discarding.');
+                    return;
+                }
+
                 // Check if this is HackerRank
                 if (request.isHackerRank) {
                     let clicked = false;
@@ -1268,8 +1464,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         console.log('Parsed multiple choice options:', uniqueOptionNumbers.map(n => n + 1));
                         
                         lastSolvedMCQ = {
-                            signature: getQuestionSignature(),
-                            questionText: findQuestionElement() ? htmlToText(findQuestionElement()).trim() : '',
+                            signature: request.questionSignature || currentSig || getQuestionSignature(),
+                            questionText: request.questionText || (findQuestionElement() ? htmlToText(findQuestionElement()).trim() : ''),
                             optionIndex: uniqueOptionNumbers[0] !== undefined ? uniqueOptionNumbers[0] : 0,
                             response: request.response,
                             isHackerRank: true,
@@ -1301,8 +1497,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             console.log(`Single choice detected, option: ${optionNumber + 1}`);
 
                             lastSolvedMCQ = {
-                                signature: getQuestionSignature(),
-                                questionText: findQuestionElement() ? htmlToText(findQuestionElement()).trim() : '',
+                                signature: request.questionSignature || currentSig || getQuestionSignature(),
+                                questionText: request.questionText || (findQuestionElement() ? htmlToText(findQuestionElement()).trim() : ''),
                                 optionIndex: optionNumber,
                                 response: request.response,
                                 isHackerRank: true,
@@ -1341,8 +1537,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                     if (optionIndex !== null && optionIndex >= 0) {
                         lastSolvedMCQ = {
-                            signature: getQuestionSignature(),
-                            questionText: qText,
+                            signature: request.questionSignature || currentSig || getQuestionSignature(),
+                            questionText: request.questionText || qText,
                             optionIndex: optionIndex,
                             response: request.response,
                             rawOptions: request.rawOptions,
@@ -1955,7 +2151,9 @@ ${codingData.starterCode}
             isHackerRank: true,
             isMCQ: true,
             isMultipleChoice: isMultipleChoice,  // Add flag for multiple choice questions
-            autoClick: autoClick
+            autoClick: autoClick,
+            questionSignature: getQuestionSignature(),
+            questionText: (questionText || '').trim()
         }, (response) => {
             console.log("Response from background:", response);
         });

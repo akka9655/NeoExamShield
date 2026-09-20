@@ -668,7 +668,7 @@ function stripCodeComments(code) {
     return finalLines.join('\n').trim();
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true, mode = '') {
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true, mode = '', questionSignature = '', questionText = '') {
     const shouldAutoClick = Boolean(autoClick === true || mode === 'autoSelect');
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
@@ -680,7 +680,9 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 isHackerRank: isHackerRank,
                 isMultipleChoice: isMultipleChoice,
                 autoClick: shouldAutoClick,
-                mode: shouldAutoClick ? 'autoSelect' : 'reveal'
+                mode: shouldAutoClick ? 'autoSelect' : 'reveal',
+                questionSignature: questionSignature,
+                questionText: questionText
             });
         } else {
             // Clean code block markers and any intro/outro markdown to get 100% pure code
@@ -1220,11 +1222,13 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
     const fallbackModels = [
         primary, 
         'gemini-3.6-flash', 
-        'gemini-flash-lite-latest', 
-        'gemini-3.5-flash-lite', 
-        'gemini-3.1-flash-lite', 
+        'gemini-3.5-flash', 
         'gemini-flash-latest', 
-        'gemini-3.5-flash'
+        'gemini-3.5-flash-lite', 
+        'gemini-flash-lite-latest', 
+        'gemini-3.1-flash-lite', 
+        'gemini-2.5-flash', 
+        'gemini-2.5-flash-lite'
     ];
     const modelsToTry = [...new Set(fallbackModels)];
 
@@ -1255,8 +1259,9 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
             generationConfig
         };
 
+        const timeoutMs = (resolvedImages && resolvedImages.length > 0) ? 12000 : 8000;
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s fast switching timeout
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
             let response = await fetch(apiUrl, {
@@ -1280,10 +1285,19 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
             if (response.ok) {
                 const data = await response.json();
-                const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (text && text.trim().length > 0) {
-                    return text.trim();
+                const parts = data.candidates?.[0]?.content?.parts || [];
+                const text = parts.map(p => p.text || '').join('').trim();
+                if (text && text.length > 0) {
+                    return text;
                 }
+                const blockReason = data.promptFeedback?.blockReason || data.candidates?.[0]?.finishReason || 'empty_response';
+                lastError = {
+                    error: `Gemini returned empty text (${blockReason}) on ${currentModel}`,
+                    errorType: 'api',
+                    detailedInfo: JSON.stringify(data.candidates?.[0] || data.promptFeedback || {})
+                };
+                console.warn(`[Gemini Fallback] Model ${currentModel} returned no text (${blockReason}), trying next fallback model...`);
+                continue;
             } else {
                 const errData = await response.json().catch(() => ({}));
                 const errMsg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
@@ -1325,6 +1339,7 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
                 errorType: 'network',
                 detailedInfo: fetchErr.message || 'Request timed out'
             };
+            console.warn(`[Gemini Fallback] Error/timeout on ${currentModel}: ${fetchErr.message}. Trying next fallback model...`);
         }
     }
 
@@ -1677,7 +1692,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         responseLength: response.length
                     });
                     
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
                     sendResponse({
                         success: true,
                         response,
@@ -1685,7 +1700,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     });
                 } else if (response && response.error) {
                     // Error case - handle the error through the response handler
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
                     sendResponse({
                         error: response.error,
                         status: 'error',
@@ -1694,7 +1709,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                 } else {
                     // Fallback case
                     console.error('No response received from AI service');
-                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick, request.mode);
+                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
                     sendResponse({
                         error: 'No response from query service',
                         status: 'error',
