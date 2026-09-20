@@ -326,6 +326,20 @@ function extractQuestionCodeAndOptions() {
     };
 }
 
+// Helper to get raw options text array directly from current DOM
+function getRawOptionsFromDOM() {
+    try {
+        const optEls = findOptionElements();
+        return Array.from(optEls).map(el => {
+            const clone = el.cloneNode(true);
+            clone.querySelectorAll('#neo-mcq-dot').forEach(d => d.remove());
+            return htmlToText(clone).trim();
+        }).filter(Boolean);
+    } catch (e) {
+        return [];
+    }
+}
+
 // MCQ state tracking for Alt+A (solve/reveal) and Alt+S (human-like click only)
 let lastSolvedMCQ = null;
 let isMCQSolving = false;
@@ -339,58 +353,71 @@ function getQuestionSignature() {
     try {
         const qEl = findQuestionElement();
         const qText = qEl ? htmlToText(qEl).trim() : '';
-        const optEls = findOptionElements();
-        const optsText = Array.from(optEls).map(el => {
-            const clone = el.cloneNode(true);
-            clone.querySelectorAll('#neo-mcq-dot').forEach(d => d.remove());
-            return htmlToText(clone).trim();
-        }).filter(Boolean).join('|||');
+        const rawOpts = getRawOptionsFromDOM();
+        const optsText = rawOpts.join('|||');
 
         // Also extract code snippet inside question container if present
         let codeSnippet = '';
         const qContainer = document.querySelector('testtaking-question, mcqsinglecorrect-question, programming-question, #content-left, [aria-labelledby="question-container"], [aria-labelledby="question-data-container"], [aria-labelledby="question-answer"]') || qEl;
         if (qContainer) {
-            const preCode = qContainer.querySelector('pre code, pre, .ql-syntax, .ace_layer.ace_text-layer');
-            if (preCode) {
-                codeSnippet = (preCode.innerText || preCode.textContent || '').trim();
+            const aceLines = qContainer.querySelectorAll('.ace_layer.ace_text-layer .ace_line');
+            if (aceLines && aceLines.length > 0) {
+                codeSnippet = Array.from(aceLines).map(l => (l.innerText !== undefined ? l.innerText : l.textContent || '').replace(/\r/g, '')).join('\n').trim();
+            }
+            if (!codeSnippet) {
+                const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
+                if (preCode) {
+                    codeSnippet = (preCode.innerText || preCode.textContent || '').trim();
+                }
             }
         }
 
-        if (!qText && !optsText && !codeSnippet) return '';
+        // Also extract question number indicator from portal header if available
+        let qNum = '';
+        const qNumEl = document.querySelector('div[class*="t-bg-primary"], div.t-whitespace-nowrap, .question-number, [aria-labelledby="question-no"]');
+        if (qNumEl) {
+            const m = (qNumEl.innerText || qNumEl.textContent || '').match(/Question\s*(?:No)?\s*[:\.]?\s*(\d+)/i);
+            if (m) qNum = `Q${m[1]}`;
+        }
+
+        if (!qText && !optsText && !codeSnippet && !qNum) return '';
         // Uniquely identifies the question; never truncates to avoid prefix collisions across programming MCQs
-        return `${qText}:::${codeSnippet}:::${optsText}`;
+        return `${qNum}:::${qText}:::${codeSnippet}:::${optsText}`;
     } catch (e) {
         return '';
     }
 }
 
-// Strict question equality helper: NEVER matches based on short common prefixes like "What will be the output..."
-function isSameQuestion(cachedSolve, currentSig, currentQText) {
+// Strict question equality helper: Ensures a cached solve is ONLY reused if it is 100% the exact same question and options
+function isSameQuestion(cachedSolve, currentSig, currentQText, currentRawOptions) {
     if (!cachedSolve) return false;
-    if (!currentSig && !currentQText) return false;
+    if (!currentSig) return false;
 
-    // 1. Exact signature match (includes full question text, code snippet, and options)
-    if (cachedSolve.signature && currentSig && cachedSolve.signature === currentSig) {
-        return true;
+    // 1. Signature must match exactly (includes Q#, text, code, options)
+    if (cachedSolve.signature && cachedSolve.signature !== currentSig) {
+        return false;
     }
 
-    // 2. Full question text and options match
+    // 2. Full question text must match strictly
     if (cachedSolve.questionText && currentQText) {
-        const cachedClean = cachedSolve.questionText.trim();
-        const currentClean = currentQText.trim();
-        if (cachedClean.length > 15 && cachedClean === currentClean) {
-            const currentOpts = findOptionElements();
-            if (cachedSolve.rawOptions && Array.isArray(cachedSolve.rawOptions)) {
-                if (currentOpts && currentOpts.length === cachedSolve.rawOptions.length) {
-                    return true;
-                }
-            } else {
-                return true;
+        if (cachedSolve.questionText.trim() !== currentQText.trim()) {
+            return false;
+        }
+    }
+
+    // 3. Option texts must match strictly
+    if (cachedSolve.rawOptions && Array.isArray(cachedSolve.rawOptions) && Array.isArray(currentRawOptions) && currentRawOptions.length > 0) {
+        if (cachedSolve.rawOptions.length !== currentRawOptions.length) {
+            return false;
+        }
+        for (let i = 0; i < cachedSolve.rawOptions.length; i++) {
+            if ((cachedSolve.rawOptions[i] || '').trim() !== (currentRawOptions[i] || '').trim()) {
+                return false;
             }
         }
     }
 
-    return false;
+    return true;
 }
 
 // Function to handle when question changes to a new one
@@ -404,15 +431,6 @@ function checkAndHandleQuestionChange() {
     }
 
     if (newSig !== currentActiveQuestionSignature) {
-        const currentQEl = findQuestionElement();
-        const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
-
-        // Check if this is strictly the same question (e.g. minor DOM re-render)
-        if (lastSolvedMCQ && isSameQuestion(lastSolvedMCQ, newSig, currentQText)) {
-            currentActiveQuestionSignature = newSig;
-            return;
-        }
-
         console.log('[MCQ] Question change detected! Invalidating previous question solve cache.');
         currentActiveQuestionSignature = newSig;
         lastSolvedMCQ = null;
@@ -425,10 +443,41 @@ function checkAndHandleQuestionChange() {
 // Check for question change periodically and on navigation clicks
 setInterval(checkAndHandleQuestionChange, 250);
 
+// Efficient mutation observer to immediately detect question swaps without high CPU usage
+let mcqMutationTimer = null;
+const mcqMutationObserver = new MutationObserver((mutations) => {
+    let relevant = false;
+    for (let i = 0; i < mutations.length; i++) {
+        const target = mutations[i].target;
+        if (target && target.nodeType === 1) {
+            const el = target;
+            if (el.id === 'neo-mcq-dot' || (el.closest && el.closest('#neo-mcq-dot, #chat-overlay-shadow-host, #chat-button-shadow-host'))) {
+                continue;
+            }
+            if (el.closest && el.closest('testtaking-question, mcqsinglecorrect-question, [aria-labelledby="question-answer"], [aria-labelledby="each-option"], [id^="tt-option-"], .ql-editor')) {
+                relevant = true;
+                break;
+            }
+        }
+    }
+    if (relevant) {
+        if (mcqMutationTimer) clearTimeout(mcqMutationTimer);
+        mcqMutationTimer = setTimeout(checkAndHandleQuestionChange, 60);
+    }
+});
+try {
+    mcqMutationObserver.observe(document.body, { childList: true, subtree: true });
+} catch (e) {}
+
 document.addEventListener('click', (e) => {
     const navClick = e.target.closest('button, [tooltip], .back-btn, .next-btn, .prev-btn, [id*="question"], [id*="section"], [aria-labelledby*="question"], [aria-labelledby*="section"], .t-cursor-pointer, .t-rounded-full, app-button');
     if (navClick) {
-        checkAndHandleQuestionChange();
+        // Clear any old solved question immediately on user navigation
+        lastSolvedMCQ = null;
+        isMCQSolving = false;
+        pendingMCQAutoClick = false;
+        removeMCQDot();
+        currentActiveQuestionSignature = '';
         setTimeout(checkAndHandleQuestionChange, 50);
         setTimeout(checkAndHandleQuestionChange, 150);
         setTimeout(checkAndHandleQuestionChange, 300);
@@ -441,8 +490,12 @@ async function handleQuestionExtraction(autoClick = true) {
     console.log('[MCQ] Starting question extraction with autoClick =', isAuto);
     checkAndHandleQuestionChange();
     currentActiveQuestionSignature = getQuestionSignature();
+    lastSolvedMCQ = null; // Always reset before fresh extraction
     isMCQSolving = true;
     pendingMCQAutoClick = isAuto;
+    activeMCQMode = isAuto ? 'autoSelect' : 'reveal';
+    lastTriggeredMode = activeMCQMode;
+    removeMCQDot();
     activeMCQMode = isAuto ? 'autoSelect' : 'reveal';
     lastTriggeredMode = activeMCQMode;
 
@@ -906,12 +959,13 @@ document.addEventListener('keydown', (event) => {
         const currentSig = getQuestionSignature();
         const currentQEl = findQuestionElement();
         const currentQText = currentQEl ? htmlToText(currentQEl).trim() : '';
+        const currentRawOptions = getRawOptionsFromDOM();
 
         // Check if we have a valid solved answer matching the CURRENT question strictly
         const isMatch = lastSolvedMCQ && 
                         lastSolvedMCQ.optionIndex !== null && 
                         lastSolvedMCQ.optionIndex >= 0 && 
-                        isSameQuestion(lastSolvedMCQ, currentSig, currentQText);
+                        isSameQuestion(lastSolvedMCQ, currentSig, currentQText, currentRawOptions);
 
         if (isMatch) {
             console.log('[Alt+S] Instantly auto-selecting previously solved MCQ option:', lastSolvedMCQ.optionIndex);
@@ -1423,6 +1477,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (request.questionText && currentQText && request.questionText.trim() !== currentQText.trim()) {
                     console.warn('[MCQ] Stale solve received for previous question (questionText mismatch). Discarding.');
                     return;
+                }
+                const currentRawOptions = getRawOptionsFromDOM();
+                if (request.rawOptions && currentRawOptions && currentRawOptions.length > 0) {
+                    const reqOpts = (request.rawOptions || []).map(o => (o || '').trim()).join('|||');
+                    const currOpts = currentRawOptions.map(o => (o || '').trim()).join('|||');
+                    if (reqOpts !== currOpts) {
+                        console.warn('[MCQ] Stale solve received for previous question (options mismatch). Discarding.');
+                        return;
+                    }
                 }
 
                 // Check if this is HackerRank

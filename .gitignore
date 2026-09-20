@@ -1,6 +1,5 @@
-# Unwanted markdown diagnostic & token dumps
+# All documentation kept local-only per user instruction (never pushed to github)
 *.md
-!README.md
 
 # Build archives & zip packages
 *.zip
