@@ -157,6 +157,11 @@ function htmlToText(element) {
     
     // Clone the element to avoid modifying the original
     const clone = element.cloneNode(true);
+
+    // Strip code editor gutter/line numbers and proctoring/extension UI from the clone
+    clone.querySelectorAll('.ace_gutter, .ace_gutter-layer, .ace_gutter-cell, .line-numbers, .gutter, #neo-mcq-dot, #chat-overlay-shadow-host, #neo-quick-hud-host').forEach(el => {
+        el.remove();
+    });
     
     // Handle superscripts - convert <sup>text</sup> to ^text
     clone.querySelectorAll('sup').forEach(sup => {
@@ -316,9 +321,7 @@ function extractImagesFromElement(container) {
 
 // Function to extract the question, code, and options
 function extractQuestionCodeAndOptions() {
-    // Extracting the question text
     const questionElement = findQuestionElement();
-    const questionText = questionElement ? htmlToText(questionElement) : '';
 
     // Extracting the code (Ace editor inside question, or pre/code blocks)
     let codeText = null;
@@ -339,6 +342,21 @@ function extractQuestionCodeAndOptions() {
         const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
         if (preCode) {
             codeText = (preCode.innerText || preCode.textContent || '').trim();
+        }
+    }
+
+    // Extracting the question text (cleaning out duplicate code containers if codeText was extracted)
+    let questionText = '';
+    if (questionElement) {
+        if (codeText) {
+            const qClone = questionElement.cloneNode(true);
+            qClone.querySelectorAll('.ace_editor, pre, .ql-syntax').forEach(el => el.remove());
+            questionText = htmlToText(qClone);
+            if (!questionText.trim()) {
+                questionText = htmlToText(questionElement);
+            }
+        } else {
+            questionText = htmlToText(questionElement);
         }
     }
 
@@ -1375,6 +1393,12 @@ function highlightMCQOption(optionIndex) {
 // Helper to dispatch a single, realistic human click without duplicate events
 function dispatchHumanClick(el) {
     if (!el) return;
+    // Safety guard: Never allow automated clicks on the Submit Test button
+    if (el.id === 'tt-header-submit' || (el.closest && el.closest('#tt-header-submit')) ||
+        (el.innerText && el.innerText.trim().toLowerCase() === 'submit test')) {
+        console.warn('[Safety Guard] Blocked automated click on Submit Test button');
+        return;
+    }
     try {
         const opts = { bubbles: true, cancelable: true, view: window };
         el.dispatchEvent(new PointerEvent('pointerdown', opts));
@@ -1446,19 +1470,23 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
     }
 
     // Identify the single best target to click:
-    // On Examly, span.checkmark1 is the custom styled radio/checkbox element inside <label>
+    // On PAT / Examly, Angular's (click) handler is bound to the option container
+    // (div[id^="tt-option-"] or div[aria-labelledby="each-option"]).
+    // Clicking the container directly triggers Angular's selectOption() and applies selection styling (!t-bg-primary).
     let clickTarget = null;
     if (target) {
-        clickTarget = target.querySelector('span.checkmark1, .checkmark, .checkmark-custom') ||
+        const cardContainer = (target.matches && (target.matches('[id^="tt-option-"]') || target.matches('[aria-labelledby="each-option"]'))) ? target :
+                              target.closest('[id^="tt-option-"], div[aria-labelledby="each-option"]');
+        clickTarget = cardContainer ||
+                      target.querySelector('div[id^="tt-option-"], div[aria-labelledby="each-option"]') ||
                       target.querySelector('label') ||
-                      target.querySelector('input[type="radio"], input[type="checkbox"]') ||
                       target;
     }
     if (!clickTarget) {
-        clickTarget = document.querySelector(`#tt-option-${optionIndex} > label > span.checkmark1`) ||
-                      document.querySelector(`#tt-option-${optionIndex} span.checkmark1`) ||
+        clickTarget = document.querySelector(`#tt-option-${optionIndex}`) ||
+                      document.querySelector(`div[aria-labelledby="each-option"]:nth-of-type(${optionIndex + 1})`) ||
                       document.querySelector(`#tt-option-${optionIndex} label`) ||
-                      document.querySelector(`#tt-option-${optionIndex}`);
+                      document.querySelector(`#tt-option-${optionIndex} span.checkmark1`);
     }
 
     if (!clickTarget) {
@@ -1477,13 +1505,14 @@ function autoSelectMCQOption(optionIndex, isHackerRank = false, isMultipleChoice
                   clickTarget.closest('label, [id^="tt-option-"], div[aria-labelledby="each-option"]')?.querySelector('input[type="radio"], input[type="checkbox"]') ||
                   document.querySelector(`#tt-option-${optionIndex} input`);
 
-    // If input is ALREADY checked, do not click it again to avoid toggling off or blinking!
-    if (input && input.checked) {
-        console.log(`[MCQ Auto-Select] Option index ${optionIndex} is already checked.`);
+    // Check if the card container already has Angular's active selection class
+    const isAlreadySelected = (clickTarget.className && clickTarget.className.includes('!t-bg-primary')) || (input && input.checked);
+    if (isAlreadySelected) {
+        console.log(`[MCQ Auto-Select] Option index ${optionIndex} is already selected.`);
         return true;
     }
 
-    // Dispatch ONE single human click on the click target
+    // Dispatch human click on the card container
     dispatchHumanClick(clickTarget);
 
     // If input is not yet checked, check it and dispatch standard events
