@@ -281,6 +281,36 @@ function extractImagesFromElement(container) {
         }
     }
 
+    // Also extract HTML5 canvas graphics (diagrams, circuits, coordinate graphs)
+    try {
+        const canvases = container.querySelectorAll('canvas');
+        for (const cvs of canvases) {
+            if (cvs.width > 20 && cvs.height > 20) {
+                try {
+                    const dataUrl = cvs.toDataURL('image/png');
+                    if (dataUrl && dataUrl.length > 80) {
+                        images.push(dataUrl);
+                    }
+                } catch(e) {}
+            }
+        }
+    } catch(e) {}
+
+    // Also extract inline <svg> diagrams (geometry, logic gates, flowcharts)
+    try {
+        const svgs = container.querySelectorAll('svg');
+        for (const svg of svgs) {
+            const rect = svg.getBoundingClientRect();
+            if (rect.width < 35 || rect.height < 35) continue;
+            if (svg.closest('#chat-overlay-shadow-host, #neo-quick-hud-host')) continue;
+            try {
+                const s = new XMLSerializer().serializeToString(svg);
+                const svg64 = btoa(unescape(encodeURIComponent(s)));
+                images.push('data:image/svg+xml;base64,' + svg64);
+            } catch(e) {}
+        }
+    } catch(e) {}
+
     return images;
 }
 
@@ -918,7 +948,7 @@ document.addEventListener('keydown', (event) => {
     }
 }, true); // useCapture: true to intercept before portal listeners
 
-// Alt+M (Option+M on macOS): If text is selected, show answer in Chatbot
+// Alt+M (Option+M on macOS): If text is selected, show Quick Short Answer HUD
 document.addEventListener('keydown', (event) => {
     const modifierKey = event.altKey;
     const isKeyM = event.code === 'KeyM' || 
@@ -935,17 +965,17 @@ document.addEventListener('keydown', (event) => {
         if (selectedText && selectedText.length > 0) {
             chrome.runtime.sendMessage({
                 action: 'showMCQToast',
-                message: 'Answering selected text in Chatbot...'
+                message: '⚡ Getting quick short answer...'
             });
-            if (typeof window.neoAskChatbot === 'function') {
-                window.neoAskChatbot(selectedText);
+            if (typeof window.neoQuickAnswer === 'function') {
+                window.neoQuickAnswer(selectedText);
             } else {
-                window.dispatchEvent(new CustomEvent('neoAskChatbot', { detail: { text: selectedText } }));
+                window.dispatchEvent(new CustomEvent('neoQuickAnswer', { detail: { text: selectedText } }));
             }
         } else {
             chrome.runtime.sendMessage({
                 action: 'showMCQToast',
-                message: 'Please select text first to send to Chatbot'
+                message: 'Please select text first to get quick answer'
             });
         }
     }

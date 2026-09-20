@@ -906,21 +906,27 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
                 );
                 if (isRateLimit) {
                     keyCooldowns.set(config.apiKey, Date.now() + 30000);
+                    storeLastError(result.detailedInfo || result.error || 'Rate limit 429 (auto-switching to next key)', 'rateLimit');
                 } else if (result && result.status === 400) {
                     const errStr = ((result.detailedInfo || '') + ' ' + (result.error || '')).toLowerCase();
                     if (errStr.includes('api_key_invalid') || errStr.includes('key not valid') || errStr.includes('invalid api key')) {
                         keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for genuinely invalid key
+                        storeLastError('Invalid API key (auto-switching to next key)', 'auth');
                     }
+                } else if (result && (result.error || result.detailedInfo)) {
+                    storeLastError(result.detailedInfo || result.error, result.errorType || 'api');
                 }
 
                 if (preferredKey === config.apiKey) {
                     preferredKey = null;
                 }
 
-                console.warn("API Key failed, falling back to next...", result);
+                console.warn("API Key failed, auto-switching to next API key...", result);
                 lastResult = result;
             }
             unblockRequests();
+            const finalErr = (lastResult && (lastResult.detailedInfo || lastResult.error)) ? (lastResult.detailedInfo || lastResult.error) : 'All API keys exhausted';
+            storeLastError(finalErr, 'allKeysFailed');
             return lastResult; // Return the last error if all failed
         }
         
@@ -1233,15 +1239,17 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
+    let consecutive429Count = 0;
     for (const currentModel of modelsToTry) {
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
         
         const googleParts = [{ text: prompt }];
         for (const img of resolvedImages) {
             if (img && img.data && img.mimeType) {
+                const mime = (img.mimeType === 'image/svg+xml' || img.mimeType.includes('svg')) ? 'image/png' : img.mimeType;
                 googleParts.push({
                     inlineData: {
-                        mimeType: img.mimeType,
+                        mimeType: mime,
                         data: img.data
                     }
                 });
@@ -1304,13 +1312,18 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
                 
                 // If rate limit (429) or quota exhausted, switch to next model immediately (free tier quotas are per-model)
                 if (response.status === 429 || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
+                    consecutive429Count++;
                     lastError = {
                         error: `Gemini rate limit exceeded: ${response.status}`,
                         errorType: 'api',
                         status: 429,
                         detailedInfo: errMsg
                     };
-                    console.warn(`[Gemini Free Tier Auto-Fallback] Model ${currentModel} reached quota/rate limit (429). Instantly switching to next model on this key...`);
+                    console.warn(`[Gemini Free Tier Auto-Fallback] Model ${currentModel} reached quota/rate limit (429).`);
+                    if (consecutive429Count >= 2) {
+                        console.warn(`[Gemini Fast Key-Hop] Quota exhausted across models on this key. Fast-switching to next API key immediately...`);
+                        break;
+                    }
                     continue; // Try next fallback model on same key!
                 }
 
@@ -1617,6 +1630,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         })();
         return true; // Keep the message channel open
     }
+
+    if (message.action === "getQuickAnswer") {
+        (async () => {
+            try {
+                const customAPIConfigs = await getCustomAPIConfigs();
+                const prompt = `You are a concise expert assistant. Provide ONLY the direct, short, concise answer to the following question or selected text in 1-2 sentences or the exact option/value/output. Do NOT include any conversational filler, greetings, markdown title headings, or lengthy explanations:\n\n${message.text}`;
+
+                if (customAPIConfigs.length > 0) {
+                    let lastResult = null;
+                    for (const config of customAPIConfigs) {
+                        const res = await queryCustomAPI(prompt, false, false, config, message.image || null);
+                        if (typeof res === 'string' && res.trim().length > 0) {
+                            sendResponse({ success: true, answer: res.trim() });
+                            return;
+                        }
+                        lastResult = res;
+                    }
+                    const errMsg = (lastResult && lastResult.error) ? lastResult.error : "Could not retrieve answer. Check API keys.";
+                    storeLastError(errMsg, 'quickAnswer');
+                    sendResponse({ success: false, error: errMsg });
+                    return;
+                }
+
+                // Fallback: Pro chat endpoint if logged in
+                const { accessToken, refreshToken } = await getTokens();
+                if (accessToken && refreshToken) {
+                    const chatEndpoint = `${API_BASE_URL}/api/pro-chat`;
+                    const res = await makeAuthenticatedRequest(chatEndpoint, "POST", accessToken, {
+                        message: prompt,
+                        refreshToken
+                    });
+                    if (res && typeof res === 'string') {
+                        sendResponse({ success: true, answer: res.trim() });
+                        return;
+                    }
+                }
+
+                const errConfig = "Please configure your API key in Settings.";
+                storeLastError(errConfig, 'quickAnswer');
+                sendResponse({ success: false, error: errConfig });
+            } catch (error) {
+                console.error('Quick answer error:', error);
+                storeLastError(error.message, 'quickAnswer');
+                sendResponse({ success: false, error: error.message });
+            }
+        })();
+        return true;
+    }
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -1720,6 +1781,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
             } catch (error) {
                 console.error("Query processing error:", error);
                 unblockRequests();
+                storeLastError(error.message, 'query');
                 
                 removeExistingToast(sender.tab.id);
                 // Show a generic error toast only if the error wasn't already handled by queryRequest
@@ -1756,6 +1818,7 @@ async function handleChatMessage(message, sender) {
             }
             unblockRequests();
             const errMsg = (lastResult && lastResult.error) ? lastResult.error : "Failed to get AI response. Please check your API key.";
+            storeLastError(errMsg, 'chat');
             sendChatErrorResponse(sender.tab.id, errMsg);
             return;
         }
@@ -2210,6 +2273,45 @@ async function showOpacityLevelToast(tabId, message, forceShow = false) {
     });
 }
 
+// Helper to format short error summary for Alt+Z notification
+function formatShortError(err) {
+    if (!err) return 'Unknown error';
+    const s = String(err).toLowerCase();
+    if (s.includes('429') || s.includes('quota') || s.includes('resource_exhausted')) return 'Rate limit / Quota reached';
+    if (s.includes('api_key_invalid') || s.includes('key not valid') || s.includes('invalid api key')) return 'Invalid API Key';
+    if (s.includes('timeout') || s.includes('timed out') || s.includes('aborted')) return 'API Timeout';
+    if (s.includes('network') || s.includes('failed to fetch') || s.includes('connection')) return 'Network Error';
+    if (s.includes('wait for your previous')) return 'Request In Progress';
+    return String(err).replace(/^(Error:\s*)/i, '').slice(0, 30);
+}
+
+// Helper to format relative time ago in short format (e.g. 15s ago, 2m ago, 1h ago)
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return '';
+    const diffSec = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (diffSec < 5) return 'just now';
+    if (diffSec < 60) return `${diffSec}s ago`;
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    return `${diffHr}h ago`;
+}
+
+// Store API or runtime errors for reporting when user toggles Alt+Z
+async function storeLastError(errorMessage, errorType = 'general') {
+    try {
+        if (!errorMessage) return;
+        const shortMsg = formatShortError(errorMessage);
+        const errorRecord = {
+            raw: String(errorMessage).slice(0, 150),
+            short: shortMsg,
+            type: errorType,
+            timestamp: Date.now()
+        };
+        await chrome.storage.local.set({ lastStoredError: errorRecord });
+    } catch(e) {}
+}
+
 // Helper to check if toasts are globally enabled (toggled via Alt+Z, default OFF)
 async function areToastsEnabled() {
     return new Promise((resolve) => {
@@ -2441,8 +2543,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await chrome.storage.local.set({ toastsEnabled: newState });
             if (!newState) {
                 await removeExistingToast(sender.tab.id);
+                showToast(sender.tab.id, 'Toasts: OFF (Ghost Mode)', false, '', true);
+            } else {
+                // 1. Show toggle ON first
+                showToast(sender.tab.id, 'Toasts: ON (Color Mode)', false, '', true);
+
+                // 2. Fetch stored error and display with relative time (in short)
+                const { lastStoredError } = await chrome.storage.local.get(['lastStoredError']);
+                setTimeout(() => {
+                    if (lastStoredError && lastStoredError.timestamp) {
+                        const timeAgo = formatTimeAgo(lastStoredError.timestamp);
+                        const errorMsg = `Last Error: ${lastStoredError.short} (${timeAgo})`;
+                        showToast(sender.tab.id, errorMsg, true, lastStoredError.raw ? `Details: ${lastStoredError.raw}` : '', true);
+                    } else {
+                        showToast(sender.tab.id, 'Status: No recent errors (All Systems OK)', false, '', true);
+                    }
+                }, 1400);
             }
-            showToast(sender.tab.id, newState ? 'Toasts: ON (Color Mode)' : 'Toasts: OFF (Ghost Mode)', false, '', true);
             sendResponse({ success: true, enabled: newState });
         })();
         return true;

@@ -2871,22 +2871,23 @@ if (typeof window.isMac === 'undefined') {
                 toggleChatOverlay();
             }
 
-            // Alt+M (Option+M on macOS): If text is selected, answer in Chatbot
+            // Alt+M (Option+M on macOS): If text is selected, show Quick Short Answer HUD
             const isKeyM = e.code === "KeyM" || (e.key && e.key.toLowerCase() === "m") || e.keyCode === 77 || e.key === "µ" || e.key === "Â";
             if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyM) {
                 const selectedText = getPageSelectedText();
                 if (selectedText && selectedText.length > 0) {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (typeof window.neoAskChatbot === "function") {
-                        window.neoAskChatbot(selectedText);
-                    }
+                    showQuickAnswerHUD(selectedText);
                 }
             }
 
-            // Close chat with Escape
-            if (e.key === "Escape" && isOverlayVisible) {
-                toggleChatOverlay(false);
+            // Close quick HUD or chat with Escape
+            if (e.key === "Escape") {
+                hideQuickAnswerHUD();
+                if (isOverlayVisible) {
+                    toggleChatOverlay(false);
+                }
             }
         });
 
@@ -2923,6 +2924,255 @@ if (typeof window.isMac === 'undefined') {
             }
             return text;
         }
+
+        // ==========================================
+        // QUICK SHORT ANSWER HUD (Alt + M)
+        // ==========================================
+        let quickHudHost = null;
+        let quickHudRoot = null;
+        let quickHudEl = null;
+        let currentQuickText = "";
+        let quickHudOpacityIndex = 0;
+        const quickHudOpacities = [0.78, 0.40, 0.95];
+
+        function createQuickAnswerHUD() {
+            if (quickHudHost && quickHudRoot && quickHudEl) {
+                return quickHudEl;
+            }
+
+            quickHudHost = document.getElementById("neo-quick-hud-host");
+            if (!quickHudHost) {
+                quickHudHost = document.createElement("div");
+                quickHudHost.id = "neo-quick-hud-host";
+                quickHudHost.setAttribute("data-neo-stealth", "true");
+                quickHudHost.setAttribute("aria-hidden", "true");
+                quickHudHost.style.cssText = `
+                    position: fixed !important;
+                    top: 0 !important;
+                    left: 0 !important;
+                    width: 0 !important;
+                    height: 0 !important;
+                    z-index: 2147483647 !important;
+                    pointer-events: none !important;
+                `;
+                document.documentElement.appendChild(quickHudHost);
+            }
+
+            quickHudRoot = quickHudHost.shadowRoot || quickHudHost.attachShadow({ mode: "open" });
+
+            quickHudEl = document.createElement("div");
+            quickHudEl.id = "neo-quick-hud";
+            quickHudEl.setAttribute("data-neo-stealth", "true");
+            quickHudEl.style.cssText = `
+                position: fixed !important;
+                width: 320px !important;
+                max-width: 90vw !important;
+                max-height: 250px !important;
+                background: rgba(15, 23, 42, 0.78) !important;
+                backdrop-filter: blur(16px) saturate(180%) !important;
+                -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+                border: 1px solid rgba(255, 255, 255, 0.20) !important;
+                border-radius: 12px !important;
+                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+                color: #f1f5f9 !important;
+                font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                font-size: 12.5px !important;
+                line-height: 1.5 !important;
+                display: none !important;
+                flex-direction: column !important;
+                overflow: hidden !important;
+                pointer-events: auto !important;
+                user-select: text !important;
+                box-sizing: border-box !important;
+                z-index: 2147483647 !important;
+                transition: opacity 0.2s ease !important;
+            `;
+
+            quickHudEl.innerHTML = `
+                <div id="quick-hud-header" style="display: flex !important; align-items: center !important; justify-content: space-between !important; padding: 7px 10px !important; background: rgba(255, 255, 255, 0.08) !important; border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important; cursor: move !important; user-select: none !important;">
+                    <div style="display: flex !important; align-items: center !important; gap: 6px !important; font-weight: 700 !important; font-size: 11px !important; color: #38bdf8 !important; letter-spacing: 0.3px !important;">
+                        <span>⚡</span>
+                        <span>Quick Answer</span>
+                    </div>
+                    <div style="display: flex !important; align-items: center !important; gap: 6px !important;">
+                        <button id="quick-hud-ghost" title="Toggle transparency" style="background: rgba(255, 255, 255, 0.12) !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 4px !important; color: #94a3b8 !important; font-size: 10px !important; font-weight: 600 !important; padding: 2px 6px !important; cursor: pointer !important;">Ghost</button>
+                        <button id="quick-hud-copy" title="Copy answer" style="background: transparent !important; border: none !important; color: #94a3b8 !important; font-size: 12px !important; cursor: pointer !important; padding: 0 3px !important;">📋</button>
+                        <button id="quick-hud-chat" title="Open in full Chatbot" style="background: transparent !important; border: none !important; color: #38bdf8 !important; font-size: 12px !important; cursor: pointer !important; padding: 0 3px !important;">💬</button>
+                        <button id="quick-hud-close" title="Close (Esc)" style="background: transparent !important; border: none !important; color: #94a3b8 !important; font-size: 15px !important; line-height: 1 !important; cursor: pointer !important; padding: 0 3px !important;">×</button>
+                    </div>
+                </div>
+                <div id="quick-hud-body" style="padding: 10px 12px !important; overflow-y: auto !important; max-height: 195px !important; font-size: 12px !important; word-break: break-word !important; color: #e2e8f0 !important;">
+                    <div id="quick-hud-loading" style="display: flex !important; align-items: center !important; gap: 8px !important; color: #94a3b8 !important;">
+                        <span style="display: inline-block !important; animation: quickPulse 1.2s infinite ease-in-out !important; color: #38bdf8 !important;">●</span>
+                        <span>Generating short answer...</span>
+                    </div>
+                    <div id="quick-hud-text" style="display: none !important;"></div>
+                </div>
+                <style>
+                    @keyframes quickPulse {
+                        0%, 100% { opacity: 0.3; transform: scale(0.8); }
+                        50% { opacity: 1; transform: scale(1.2); }
+                    }
+                    #quick-hud-body::-webkit-scrollbar { width: 4px; }
+                    #quick-hud-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 4px; }
+                </style>
+            `;
+
+            quickHudRoot.appendChild(quickHudEl);
+
+            // Dragging handlers for Quick HUD
+            const header = quickHudEl.querySelector("#quick-hud-header");
+            let isDraggingHud = false;
+            let hudStartX = 0, hudStartY = 0;
+            let hudInitialLeft = 0, hudInitialTop = 0;
+
+            header.addEventListener("mousedown", (e) => {
+                if (e.target.tagName === 'BUTTON') return;
+                isDraggingHud = true;
+                hudStartX = e.clientX;
+                hudStartY = e.clientY;
+                const rect = quickHudEl.getBoundingClientRect();
+                hudInitialLeft = rect.left;
+                hudInitialTop = rect.top;
+                e.preventDefault();
+            });
+
+            document.addEventListener("mousemove", (e) => {
+                if (!isDraggingHud) return;
+                const dx = e.clientX - hudStartX;
+                const dy = e.clientY - hudStartY;
+                let newLeft = hudInitialLeft + dx;
+                let newTop = hudInitialTop + dy;
+                newLeft = Math.max(10, Math.min(window.innerWidth - 330, newLeft));
+                newTop = Math.max(10, Math.min(window.innerHeight - 100, newTop));
+                quickHudEl.style.left = newLeft + "px";
+                quickHudEl.style.top = newTop + "px";
+                quickHudEl.style.right = "auto";
+                quickHudEl.style.bottom = "auto";
+            });
+
+            document.addEventListener("mouseup", () => {
+                isDraggingHud = false;
+            });
+
+            // Button handlers
+            quickHudEl.querySelector("#quick-hud-close").addEventListener("click", () => {
+                hideQuickAnswerHUD();
+            });
+
+            quickHudEl.querySelector("#quick-hud-ghost").addEventListener("click", () => {
+                quickHudOpacityIndex = (quickHudOpacityIndex + 1) % quickHudOpacities.length;
+                const op = quickHudOpacities[quickHudOpacityIndex];
+                quickHudEl.style.background = `rgba(15, 23, 42, ${op})`;
+            });
+
+            quickHudEl.querySelector("#quick-hud-copy").addEventListener("click", () => {
+                const textEl = quickHudEl.querySelector("#quick-hud-text");
+                const text = textEl ? textEl.innerText : "";
+                if (text) {
+                    navigator.clipboard.writeText(text).catch(() => {});
+                    const copyBtn = quickHudEl.querySelector("#quick-hud-copy");
+                    copyBtn.textContent = "✓";
+                    setTimeout(() => { copyBtn.textContent = "📋"; }, 1500);
+                }
+            });
+
+            quickHudEl.querySelector("#quick-hud-chat").addEventListener("click", () => {
+                hideQuickAnswerHUD();
+                if (currentQuickText && typeof window.neoAskChatbot === "function") {
+                    window.neoAskChatbot(currentQuickText);
+                }
+            });
+
+            return quickHudEl;
+        }
+
+        function hideQuickAnswerHUD() {
+            if (quickHudEl) {
+                quickHudEl.style.display = "none";
+            }
+        }
+
+        async function showQuickAnswerHUD(text) {
+            if (!text || !text.trim()) return;
+            currentQuickText = text.trim();
+
+            const hud = createQuickAnswerHUD();
+
+            // Calculate coordinates near selection or default to top-right
+            let targetLeft = window.innerWidth - 340;
+            let targetTop = 28;
+
+            try {
+                const sel = window.getSelection();
+                if (sel && sel.rangeCount > 0) {
+                    const range = sel.getRangeAt(0);
+                    const rect = range.getBoundingClientRect();
+                    if (rect && rect.width > 0 && rect.height > 0) {
+                        targetLeft = rect.left;
+                        targetTop = rect.bottom + 8;
+                    }
+                }
+            } catch(e) {}
+
+            // Viewport clamping
+            if (targetLeft + 330 > window.innerWidth) {
+                targetLeft = Math.max(16, window.innerWidth - 335);
+            }
+            if (targetLeft < 16) targetLeft = 16;
+            if (targetTop + 240 > window.innerHeight) {
+                targetTop = Math.max(16, window.innerHeight - 250);
+            }
+
+            hud.style.left = targetLeft + "px";
+            hud.style.top = targetTop + "px";
+            hud.style.right = "auto";
+            hud.style.bottom = "auto";
+            hud.style.display = "flex";
+
+            const loadingEl = hud.querySelector("#quick-hud-loading");
+            const textEl = hud.querySelector("#quick-hud-text");
+            if (loadingEl) loadingEl.style.display = "flex";
+            if (textEl) {
+                textEl.style.display = "none";
+                textEl.innerHTML = "";
+            }
+
+            try {
+                chrome.runtime.sendMessage({
+                    action: "getQuickAnswer",
+                    text: currentQuickText
+                }, (response) => {
+                    if (loadingEl) loadingEl.style.display = "none";
+                    if (!textEl) return;
+                    textEl.style.display = "block";
+
+                    if (response && response.success && response.answer) {
+                        // Render clean answer
+                        let formatted = response.answer
+                            .replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                            .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.15); padding: 1px 4px; border-radius: 3px; font-family: monospace; color: #38bdf8;">$1</code>');
+                        textEl.innerHTML = `<div style="line-height: 1.45; font-size: 12px; color: #f8fafc; font-weight: 500;">${formatted}</div>`;
+                    } else {
+                        const err = (response && response.error) ? response.error : "Could not generate answer. Check API keys.";
+                        textEl.innerHTML = `<span style="color: #f87171; font-size: 11.5px;">${err}</span>`;
+                    }
+                });
+            } catch(err) {
+                if (loadingEl) loadingEl.style.display = "none";
+                if (textEl) {
+                    textEl.style.display = "block";
+                    textEl.innerHTML = `<span style="color: #f87171; font-size: 11.5px;">Connection error: ${err.message}</span>`;
+                }
+            }
+        }
+
+        window.neoQuickAnswer = showQuickAnswerHUD;
+        window.addEventListener("neoQuickAnswer", (e) => {
+            if (e.detail && e.detail.text) {
+                showQuickAnswerHUD(e.detail.text);
+            }
+        });
 
         // Listen for internal toggle event
         window.addEventListener("neoToggleChat", () => {
