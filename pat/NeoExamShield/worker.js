@@ -1693,6 +1693,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
 IMPORTANT REQUIREMENTS:
 - Provide ONLY the solution code, absolutely NO explanations or comments (no //, no #, no /* */ comments like "// Read inputs" or "// Consume newline")
+- If the programming language is C, STRICTLY DO NOT USE 'long long' or 'unsigned long long' under any circumstances. Use standard 'int' (or 'long' if necessary).
 - The code must be complete and ready to run
 - Include all necessary imports and function definitions
 - Handle input/output exactly as specified
@@ -1709,6 +1710,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                             Always read the input from standard input as specified.
                             CRITICAL LANGUAGE RULES:
                             - If the language is C or C++, include all required headers (<stdio.h>, <stdlib.h>, <string.h>, <math.h>). Ensure format specifiers match variable types precisely. Handle newline/whitespace before strings or characters properly. Always end with return 0;.
+                            - STRICT RULE FOR C PROGRAMMING: DO NOT USE 'long long' or 'unsigned long long' under any circumstances. Always use standard 'int' (or 'long' if values exceed 32-bit limits, but NEVER 'long long'). Ensure printf/scanf format specifiers match variable types (%d for int, %ld for long).
                             - CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.
                             - Output ONLY the complete executable code inside markdown code fences. Absolutely no text before or after.` +
                             `Question:\n${request.question}\n\n` +
