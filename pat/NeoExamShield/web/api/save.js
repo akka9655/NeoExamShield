@@ -1,4 +1,10 @@
-import { kv } from '@vercel/kv';
+// Vercel Serverless Function - Save Configurations for NeoExamShield Setup Portal
+const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM",
+    projectId: "neoshield"
+};
+
+const BASE_URL = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/(default)/documents`;
 
 export default async function handler(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,38 +15,69 @@ export default async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Method Not Allowed' });
 
     const { username, password, newPassword, configs } = req.body || {};
-    if (!username || !password) return res.status(400).json({ error: 'Authentication required' });
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Authentication required' });
+    }
 
     try {
-        const userKey = `user:${username.toUpperCase()}`;
-        let user;
+        const userUrl = `${BASE_URL}/users/${username}?key=${FIREBASE_CONFIG.apiKey}`;
 
-        try {
-            user = await kv.get(userKey);
-        } catch (kvErr) {
-            console.warn('Vercel KV warning:', kvErr.message);
-            return res.status(500).json({ 
-                error: 'Vercel KV Database not connected. Please connect a Storage KV database in your Vercel Dashboard.' 
-            });
+        // Verify existing user password first
+        const userRes = await fetch(userUrl);
+        if (userRes.status === 404) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        if (!userRes.ok) {
+            return res.status(userRes.status).json({ error: `Firebase error (${userRes.status})` });
         }
 
-        if (!user || user.password !== password) {
+        const docData = await userRes.json();
+        const storedPassword = docData.fields?.password?.stringValue;
+        if (storedPassword !== password) {
             return res.status(401).json({ error: 'Unauthorized: Incorrect password' });
         }
 
-        // Update configurations
-        if (configs) {
-            user.configs = configs;
-        }
+        // Prepare PATCH payload with updateMask
+        const validConfigs = (configs || []).filter(c => c && c.apiKey && c.apiKey.trim().length > 0);
+        let maskParams = 'updateMask.fieldPaths=configs&updateMask.fieldPaths=updatedAt';
 
-        // Update password if requested
+        const updateFields = {
+            configs: {
+                arrayValue: {
+                    values: validConfigs.map(c => ({
+                        mapValue: {
+                            fields: {
+                                aiProvider: { stringValue: c.aiProvider || 'google' },
+                                apiKey: { stringValue: c.apiKey.trim() },
+                                modelName: { stringValue: c.modelName || 'gemini-3.6-flash' },
+                                customEndpoint: { stringValue: c.customEndpoint || '' }
+                            }
+                        }
+                    }))
+                }
+            },
+            updatedAt: { timestampValue: new Date().toISOString() }
+        };
+
         if (newPassword && newPassword.trim().length > 0) {
-            user.password = newPassword.trim();
+            maskParams += '&updateMask.fieldPaths=password';
+            updateFields.password = { stringValue: newPassword.trim() };
         }
 
-        await kv.set(userKey, user);
+        const patchUrl = `${BASE_URL}/users/${username}?${maskParams}&key=${FIREBASE_CONFIG.apiKey}`;
+        const patchRes = await fetch(patchUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fields: updateFields })
+        });
+
+        if (!patchRes.ok) {
+            const errData = await patchRes.json().catch(() => ({}));
+            return res.status(500).json({ error: errData.error?.message || 'Failed to update user settings' });
+        }
 
         return res.status(200).json({ success: true, message: 'Settings saved successfully' });
+
     } catch (error) {
         console.error('Save Error:', error);
         return res.status(500).json({ error: error.message || 'Internal server error' });

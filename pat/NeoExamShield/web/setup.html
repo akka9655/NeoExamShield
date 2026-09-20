@@ -1634,16 +1634,20 @@
             'custom': ''
         };
 
-        // Initialize Firebase Firestore
+        // Initialize Firebase Firestore (SDK or Direct REST)
         try {
             if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.projectId && window.FIREBASE_CONFIG.projectId !== 'YOUR_PROJECT_ID') {
-                firebase.initializeApp(window.FIREBASE_CONFIG);
-                db = firebase.firestore();
-                useFirebase = true;
-                console.log("✓ Firebase Firestore connected successfully.");
+                if (typeof firebase !== 'undefined' && firebase.initializeApp) {
+                    firebase.initializeApp(window.FIREBASE_CONFIG);
+                    db = firebase.firestore();
+                    useFirebase = true;
+                    console.log("✓ Firebase Firestore SDK connected successfully.");
+                } else {
+                    console.log("ℹ Firebase SDK scripts not loaded or blocked. Using direct Firestore REST engine.");
+                }
             }
         } catch (err) {
-            console.warn("Firebase Init Notice:", err);
+            console.warn("Firebase Init Notice (using direct REST engine):", err);
         }
 
         // Check for remembered session
@@ -1762,6 +1766,166 @@
         }
 
         // ==========================================
+        // DUAL-ENGINE FIRESTORE CLIENT (SDK + REST)
+        // ==========================================
+        const FirestoreClient = {
+            async getDoc(username) {
+                // 1. Try Firebase JS SDK if available
+                if (useFirebase && db) {
+                    try {
+                        const doc = await db.collection('users').doc(username).get();
+                        if (!doc.exists) return null;
+                        const d = doc.data();
+                        return {
+                            exists: true,
+                            password: d.password || '',
+                            staticCode: d.staticCode || username,
+                            configs: d.configs || []
+                        };
+                    } catch (e) {
+                        console.warn("Firestore SDK getDoc error, trying REST:", e);
+                    }
+                }
+
+                // 2. Direct Firestore REST API
+                const cfg = window.FIREBASE_CONFIG;
+                if (cfg && cfg.projectId && cfg.apiKey) {
+                    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${username}?key=${cfg.apiKey}`;
+                    const res = await fetch(url);
+                    if (res.status === 404) return null;
+                    if (res.ok) {
+                        const docData = await res.json();
+                        const f = docData.fields || {};
+                        const rawConfigs = f.configs?.arrayValue?.values || [];
+                        const configs = rawConfigs.map(item => {
+                            const cf = item.mapValue?.fields || {};
+                            return {
+                                aiProvider: cf.aiProvider?.stringValue || 'google',
+                                customEndpoint: cf.customEndpoint?.stringValue || '',
+                                apiKey: cf.apiKey?.stringValue || '',
+                                modelName: cf.modelName?.stringValue || 'gemini-3.6-flash'
+                            };
+                        }).filter(c => Boolean(c.apiKey));
+
+                        return {
+                            exists: true,
+                            password: f.password?.stringValue || '',
+                            staticCode: f.staticCode?.stringValue || username,
+                            configs: configs
+                        };
+                    }
+                }
+
+                return null;
+            },
+
+            async createDoc(username, password) {
+                // 1. Try Firebase JS SDK if available
+                if (useFirebase && db) {
+                    try {
+                        const userRef = db.collection('users').doc(username);
+                        await userRef.set({
+                            password: password,
+                            staticCode: username,
+                            configs: [],
+                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                        });
+                        return;
+                    } catch (e) {
+                        console.warn("Firestore SDK createDoc error, trying REST:", e);
+                    }
+                }
+
+                // 2. Direct Firestore REST API
+                const cfg = window.FIREBASE_CONFIG;
+                if (cfg && cfg.projectId && cfg.apiKey) {
+                    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${username}?key=${cfg.apiKey}`;
+                    const res = await fetch(url, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            fields: {
+                                password: { stringValue: password },
+                                staticCode: { stringValue: username },
+                                configs: { arrayValue: { values: [] } },
+                                createdAt: { timestampValue: new Date().toISOString() }
+                            }
+                        })
+                    });
+
+                    if (res.ok) return;
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error?.message || `Failed to create user (${res.status})`);
+                }
+
+                throw new Error("No database connection available");
+            },
+
+            async updateDoc(username, configs, newPassword = null) {
+                const validConfigs = (configs || []).filter(c => c && c.apiKey && c.apiKey.trim().length > 0);
+
+                // 1. Try Firebase JS SDK if available
+                if (useFirebase && db) {
+                    try {
+                        const userRef = db.collection('users').doc(username);
+                        const updatePayload = {
+                            configs: validConfigs,
+                            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                        };
+                        if (newPassword) {
+                            updatePayload.password = newPassword;
+                        }
+                        await userRef.set(updatePayload, { merge: true });
+                        return;
+                    } catch (e) {
+                        console.warn("Firestore SDK updateDoc error, trying REST:", e);
+                    }
+                }
+
+                // 2. Direct Firestore REST API
+                const cfg = window.FIREBASE_CONFIG;
+                if (cfg && cfg.projectId && cfg.apiKey) {
+                    let mask = 'updateMask.fieldPaths=configs&updateMask.fieldPaths=updatedAt';
+                    const updateFields = {
+                        configs: {
+                            arrayValue: {
+                                values: validConfigs.map(c => ({
+                                    mapValue: {
+                                        fields: {
+                                            aiProvider: { stringValue: c.aiProvider || 'google' },
+                                            apiKey: { stringValue: c.apiKey.trim() },
+                                            modelName: { stringValue: c.modelName || 'gemini-3.6-flash' },
+                                            customEndpoint: { stringValue: c.customEndpoint || '' }
+                                        }
+                                    }
+                                }))
+                            }
+                        },
+                        updatedAt: { timestampValue: new Date().toISOString() }
+                    };
+
+                    if (newPassword) {
+                        mask += '&updateMask.fieldPaths=password';
+                        updateFields.password = { stringValue: newPassword.trim() };
+                    }
+
+                    const url = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/(default)/documents/users/${username}?${mask}&key=${cfg.apiKey}`;
+                    const res = await fetch(url, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ fields: updateFields })
+                    });
+
+                    if (res.ok) return;
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error?.message || `Failed to save configurations (${res.status})`);
+                }
+
+                throw new Error("No database connection available");
+            }
+        };
+
+        // ==========================================
         // AUTHENTICATION & UNIQUE 3-DIGIT GENERATION
         // ==========================================
         const RESERVED_CODES = ['000', '785'];
@@ -1769,19 +1933,23 @@
         async function generateRandomUsername() {
             const input = document.getElementById('username');
             const status = document.getElementById('usernameStatus');
-            if (!db) { input.value = Math.floor(100 + Math.random() * 900).toString(); return; }
             status.innerHTML = '<span style="color: var(--text-muted);">Finding available code...</span>';
             for (let i = 0; i < 50; i++) {
                 const candidate = Math.floor(100 + Math.random() * 900).toString();
                 if (RESERVED_CODES.includes(candidate)) continue;
-                const doc = await db.collection('users').doc(candidate).get();
-                if (!doc.exists) {
-                    input.value = candidate;
-                    status.innerHTML = '<span style="color: #10B981;">✓ Available!</span>';
-                    return;
+                try {
+                    const doc = await FirestoreClient.getDoc(candidate);
+                    if (!doc) {
+                        input.value = candidate;
+                        status.innerHTML = '<span style="color: #10B981;">✓ Available!</span>';
+                        return;
+                    }
+                } catch (e) {
+                    break;
                 }
             }
-            status.innerHTML = '<span style="color: #EF4444;">Could not find available code. Try manually.</span>';
+            input.value = Math.floor(100 + Math.random() * 900).toString();
+            status.innerHTML = '<span style="color: #10B981;">✓ Generated code</span>';
         }
 
         async function checkUsernameAvailability() {
@@ -1796,11 +1964,10 @@
                 status.innerHTML = '<span style="color: #EF4444;">✗ Reserved system code. Please choose another.</span>';
                 return;
             }
-            if (!db) return;
             status.innerHTML = '<span style="color: var(--text-muted);">Checking...</span>';
             try {
-                const doc = await db.collection('users').doc(code).get();
-                if (doc.exists) {
+                const doc = await FirestoreClient.getDoc(code);
+                if (doc) {
                     status.innerHTML = '<span style="color: #EF4444;">✗ Already taken. Try another.</span>';
                 } else {
                     status.innerHTML = '<span style="color: #10B981;">✓ Available!</span>';
@@ -1848,58 +2015,48 @@
             btn.querySelector('span').innerText = isSignup ? "Creating Account..." : "Authenticating...";
 
             try {
-                if (useFirebase && db) {
-                    const userRef = db.collection('users').doc(username);
-                    const userDoc = await userRef.get();
-
-                    if (isSignup) {
-                        if (userDoc.exists) {
-                            btn.disabled = false;
-                            btn.querySelector('span').innerText = originalText;
-                            showToast("This username is already taken. Please choose another.", "error");
-                            return;
-                        }
-
-                        // Create user doc (username IS the code)
-                        await userRef.set({
-                            password: password,
-                            staticCode: username,
-                            configs: [],
-                            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                        });
-
-                        currentAuth = { username, password, staticCode: username };
-                        localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
-                        showToast(`Account created! Your code is ${username}`, "success");
-                        loadDashboard(username, []);
+                // Tier 1 & 2: Direct Dual Engine (Firestore SDK + Firestore REST)
+                if (isSignup) {
+                    const existing = await FirestoreClient.getDoc(username);
+                    if (existing) {
+                        btn.disabled = false;
+                        btn.querySelector('span').innerText = originalText;
+                        showToast("This username is already taken. Please choose another.", "error");
                         return;
+                    }
 
-                    } else {
-                        // Login Flow
-                        if (!userDoc.exists) {
-                            btn.disabled = false;
-                            btn.querySelector('span').innerText = originalText;
-                            showToast("Account not found. Please click Sign Up below.", "error");
-                            return;
-                        }
+                    await FirestoreClient.createDoc(username, password);
+                    currentAuth = { username, password, staticCode: username };
+                    localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
+                    showToast(`Account created! Your code is ${username}`, "success");
+                    loadDashboard(username, []);
+                    return;
 
-                        const data = userDoc.data();
-                        if (data.password !== password) {
+                } else {
+                    // Login Flow
+                    const user = await FirestoreClient.getDoc(username);
+                    if (user) {
+                        if (user.password !== password) {
                             btn.disabled = false;
                             btn.querySelector('span').innerText = originalText;
                             showToast("Incorrect password. Please try again.", "error");
                             return;
                         }
 
-                        currentAuth = { username, password, staticCode: data.staticCode || username };
+                        currentAuth = { username, password, staticCode: user.staticCode || username };
                         localStorage.setItem('neoexam_session', JSON.stringify({ username, password }));
                         if (!isSilent) showToast("Logged in successfully!", "success");
-                        loadDashboard(data.staticCode || username, data.configs || []);
+                        loadDashboard(user.staticCode || username, user.configs || []);
                         return;
                     }
+                    // If user is null, check serverless fallback below before rejecting
                 }
+            } catch (clientErr) {
+                console.warn("Direct Firestore auth notice, trying serverless fallback:", clientErr);
+            }
 
-                // Fallback: Vercel serverless API
+            // Tier 3: Serverless API fallback (Vercel serverless -> Firestore REST)
+            try {
                 const res = await fetch('/api/auth', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1923,7 +2080,7 @@
                 console.error("Auth error:", err);
                 btn.disabled = false;
                 btn.querySelector('span').innerText = originalText;
-                showToast("Connection error. Check Firebase configuration in firebaseConfig.js", "error");
+                showToast("Connection error. Could not connect to Firebase database.", "error");
             }
         }
 
@@ -2252,33 +2409,26 @@
             btn.innerHTML = `<span>Saving to Cloud...</span>`;
 
             try {
-                if (useFirebase && db) {
-                    const userRef = db.collection('users').doc(currentAuth.username);
-                    const updatePayload = {
-                        configs: configs,
-                        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    };
+                // Tier 1 & 2: FirestoreClient (Dual SDK / Direct REST)
+                await FirestoreClient.updateDoc(currentAuth.username, configs, newPassword);
 
-                    if (newPassword) {
-                        updatePayload.password = newPassword;
-                    }
+                if (newPassword) {
+                    currentAuth.password = newPassword;
+                    localStorage.setItem('neoexam_session', JSON.stringify({ username: currentAuth.username, password: newPassword }));
+                    document.getElementById('newPassword').value = '';
+                    document.getElementById('securityFields').classList.add('hidden');
+                    document.getElementById('securityChevron').innerText = '▼';
+                }
 
-                    await userRef.update(updatePayload);
+                btn.innerHTML = `✓ Changes Saved!`;
+                btn.style.background = 'var(--success)';
+                showToast("All API keys & priority order saved successfully!", "success");
 
-                    if (newPassword) {
-                        currentAuth.password = newPassword;
-                        localStorage.setItem('neoexam_session', JSON.stringify({ username: currentAuth.username, password: newPassword }));
-                        document.getElementById('newPassword').value = '';
-                        document.getElementById('securityFields').classList.add('hidden');
-                        document.getElementById('securityChevron').innerText = '▼';
-                    }
+            } catch (clientErr) {
+                console.warn("Direct Firestore save notice, trying serverless fallback:", clientErr);
 
-                    btn.innerHTML = `✓ Changes Saved!`;
-                    btn.style.background = 'var(--success)';
-                    showToast("All API keys & priority order saved successfully!", "success");
-
-                } else {
-                    // Fallback to Vercel API
+                // Tier 3: Serverless API fallback (Vercel serverless -> Firestore REST)
+                try {
                     const res = await fetch('/api/save', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -2307,11 +2457,11 @@
                     btn.innerHTML = `✓ Changes Saved!`;
                     btn.style.background = 'var(--success)';
                     showToast("Settings saved successfully!", "success");
-                }
 
-            } catch (err) {
-                console.error("Save error:", err);
-                showToast(`Failed to save: ${err.message}`, "error");
+                } catch (serverErr) {
+                    console.error("Save error:", serverErr);
+                    showToast(`Failed to save: ${serverErr.message}`, "error");
+                }
             }
 
             setTimeout(() => {
