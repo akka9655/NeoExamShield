@@ -472,6 +472,17 @@ chrome.commands.onCommand.addListener((command, tab) => {
                 shortcutStates[command] = false; // Reset the state after processing
             });
         }
+
+        if (command === 'toggle-sync-code') {
+            if (tab && tab.id) {
+                chrome.tabs.sendMessage(tab.id, { action: 'toggleSyncCodeHUD' }, () => {
+                    if (chrome.runtime.lastError) { /* ignore if content script not yet injected */ }
+                    shortcutStates[command] = false;
+                });
+            } else {
+                shortcutStates[command] = false;
+            }
+        }
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -1676,6 +1687,161 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message });
             }
         })();
+        return true;
+    }
+});
+
+// Sync API configs by code or raw key
+async function handleSyncByCode(rawCode) {
+    const code = String(rawCode || '').trim();
+    if (!code) throw new Error('Code cannot be empty');
+
+    // Case 1: Master default code 000
+    if (code === '000') {
+        const defaultKeys = [
+            "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+            "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+            "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+            "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+        ];
+        const configs = defaultKeys.map(k => ({
+            aiProvider: 'google',
+            customEndpoint: '',
+            apiKey: k,
+            modelName: 'gemini-3.6-flash'
+        }));
+        await chrome.storage.local.set({
+            apiConfigs: configs,
+            linkedCode: '000',
+            useCustomAPI: true
+        });
+        return { success: true, count: configs.length };
+    }
+
+    // Case 2: Master pool code 785
+    if (code === '785') {
+        const defaultKeys = [
+            "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+            "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+            "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+            "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+        ];
+        let allConfigs = defaultKeys.map(k => ({
+            aiProvider: 'google',
+            customEndpoint: '',
+            apiKey: k,
+            modelName: 'gemini-3.6-flash'
+        }));
+
+        try {
+            const listUrl = 'https://firestore.googleapis.com/v1/projects/neoshield/databases/(default)/documents/users?key=AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM&pageSize=300';
+            const res = await fetch(listUrl);
+            if (res.ok) {
+                const data = await res.json();
+                for (const doc of (data.documents || [])) {
+                    const raw = doc.fields?.configs?.arrayValue?.values || [];
+                    for (const item of raw) {
+                        const f = item.mapValue?.fields || {};
+                        const k = f.apiKey?.stringValue?.trim();
+                        if (k && k.length > 0) {
+                            allConfigs.push({
+                                aiProvider: f.aiProvider?.stringValue || 'google',
+                                customEndpoint: f.customEndpoint?.stringValue || '',
+                                apiKey: k,
+                                modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
+                            });
+                        }
+                    }
+                }
+            }
+        } catch(e) {}
+
+        const seen = new Set();
+        const uniqueConfigs = [];
+        for (const c of allConfigs) {
+            if (!seen.has(c.apiKey)) {
+                seen.add(c.apiKey);
+                uniqueConfigs.push(c);
+            }
+        }
+
+        await chrome.storage.local.set({
+            apiConfigs: uniqueConfigs,
+            linkedCode: '785',
+            useCustomAPI: true
+        });
+        return { success: true, count: uniqueConfigs.length };
+    }
+
+    // Case 3: Raw Gemini / AI API key entered
+    if (code.startsWith('AIza') || code.startsWith('AQ.') || code.length >= 25) {
+        const configs = [{
+            aiProvider: 'google',
+            customEndpoint: '',
+            apiKey: code,
+            modelName: 'gemini-3.6-flash'
+        }];
+        await chrome.storage.local.set({
+            apiConfigs: configs,
+            customAPIKey: code,
+            linkedCode: 'custom',
+            useCustomAPI: true
+        });
+        return { success: true, count: 1 };
+    }
+
+    // Case 4: Custom 3-digit user code from Firestore REST API
+    try {
+        const userUrl = `https://firestore.googleapis.com/v1/projects/neoshield/databases/(default)/documents/users/${encodeURIComponent(code)}?key=AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM`;
+        const res = await fetch(userUrl);
+        if (res.ok) {
+            const data = await res.json();
+            const raw = data.fields?.configs?.arrayValue?.values || [];
+            const configs = raw.map(item => {
+                const f = item.mapValue?.fields || {};
+                return {
+                    aiProvider: f.aiProvider?.stringValue || 'google',
+                    customEndpoint: f.customEndpoint?.stringValue || '',
+                    apiKey: f.apiKey?.stringValue?.trim() || '',
+                    modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
+                };
+            }).filter(c => Boolean(c.apiKey));
+
+            if (configs.length > 0) {
+                await chrome.storage.local.set({
+                    apiConfigs: configs,
+                    linkedCode: code,
+                    useCustomAPI: true
+                });
+                return { success: true, count: configs.length };
+            }
+        }
+    } catch(e) {}
+
+    // Fallback: Vercel serverless API
+    try {
+        const vRes = await fetch(`https://neoexamshield.vercel.app/api/sync?code=${encodeURIComponent(code)}`);
+        if (vRes.ok) {
+            const data = await vRes.json();
+            if (data.configs && data.configs.length > 0) {
+                await chrome.storage.local.set({
+                    apiConfigs: data.configs,
+                    linkedCode: code,
+                    useCustomAPI: true
+                });
+                return { success: true, count: data.configs.length };
+            }
+        }
+    } catch(e) {}
+
+    throw new Error('Code not found. Use 000 for master pool or enter your Gemini API key.');
+}
+
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'syncByCode') {
+        handleSyncByCode(request.code)
+            .then(res => sendResponse(res))
+            .catch(err => sendResponse({ success: false, error: err.message || 'Sync failed' }));
         return true;
     }
 });

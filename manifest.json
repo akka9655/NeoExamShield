@@ -51,7 +51,6 @@
      "matches": ["http://*/*", "https://*/*"]
    },
   "action": {
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon16.png",
       "48": "images/icon48.png",
@@ -157,6 +156,13 @@
         "mac": "Alt+P"
       },
       "description": "Paste using drag-and-drop when blocked"
+    },
+    "toggle-sync-code": {
+      "suggested_key": {
+        "default": "Alt+N",
+        "mac": "Alt+N"
+      },
+      "description": "Enter 3-digit sync code"
     }
   },
   "icons": {

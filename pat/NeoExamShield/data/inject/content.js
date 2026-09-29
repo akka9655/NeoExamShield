@@ -1184,6 +1184,199 @@ document.addEventListener('keydown', (event) => {
     }
 });
 
+// Alt+N (Option+N on macOS): Toggle Small Code Entry Box HUD
+document.addEventListener('keydown', (event) => {
+    const modifierKey = event.altKey;
+    const isKeyN = event.code === 'KeyN' || 
+                   (event.key && event.key.toLowerCase() === 'n') || 
+                   event.keyCode === 78 || event.which === 78 ||
+                   event.key === '˜' || event.key === 'ñ' || event.key === 'Ñ';
+
+    if (modifierKey && !event.ctrlKey && !event.shiftKey && !event.metaKey && isKeyN) {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSyncCodeHUD();
+    }
+}, true);
+
+function toggleSyncCodeHUD() {
+    let existing = document.getElementById('neo-sync-hud-container');
+    if (existing) {
+        existing.remove();
+        return;
+    }
+
+    const host = document.createElement('div');
+    host.id = 'neo-sync-hud-container';
+    host.style.cssText = 'position:fixed;top:18px;right:20px;z-index:2147483647;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;user-select:none;';
+
+    const shadow = host.attachShadow({ mode: 'open' });
+    shadow.innerHTML = `
+        <style>
+            @keyframes neoSlideIn {
+                from { opacity: 0; transform: translateY(-8px) scale(0.96); }
+                to { opacity: 1; transform: translateY(0) scale(1); }
+            }
+            .hud-card {
+                width: 220px;
+                background: #0f172a;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+                border-radius: 10px;
+                padding: 10px 12px;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+                animation: neoSlideIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+                box-sizing: border-box;
+            }
+            .hud-header {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 8px;
+            }
+            .hud-title {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 11px;
+                font-weight: 700;
+                color: #38bdf8;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+            }
+            .hud-dot {
+                width: 6px;
+                height: 6px;
+                background: #38bdf8;
+                border-radius: 50%;
+                display: inline-block;
+            }
+            .hud-close {
+                cursor: pointer;
+                color: #94a3b8;
+                font-size: 13px;
+                line-height: 1;
+                border: none;
+                background: none;
+                padding: 2px 4px;
+                border-radius: 4px;
+            }
+            .hud-close:hover {
+                color: #f1f5f9;
+                background: rgba(255, 255, 255, 0.1);
+            }
+            .hud-row {
+                display: flex;
+                gap: 6px;
+            }
+            .hud-input {
+                flex: 1;
+                background: rgba(255, 255, 255, 0.07);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                border-radius: 6px;
+                color: #ffffff;
+                font-size: 14px;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-weight: 700;
+                text-align: center;
+                letter-spacing: 2px;
+                padding: 6px 8px;
+                outline: none;
+                transition: border-color 0.15s, box-shadow 0.15s;
+            }
+            .hud-input:focus {
+                border-color: #38bdf8;
+                box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+            }
+            .hud-btn {
+                background: #0284c7;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 12px;
+                font-weight: 600;
+                cursor: pointer;
+                transition: background 0.15s;
+            }
+            .hud-btn:hover {
+                background: #0369a1;
+            }
+            .hud-status {
+                font-size: 10px;
+                color: #94a3b8;
+                margin-top: 6px;
+                text-align: center;
+                min-height: 14px;
+            }
+        </style>
+        <div class="hud-card">
+            <div class="hud-header">
+                <div class="hud-title"><span class="hud-dot"></span>Sync Code</div>
+                <button class="hud-close" title="Close (Esc)">✕</button>
+            </div>
+            <div class="hud-row">
+                <input class="hud-input" type="text" placeholder="000" maxlength="50" autocomplete="off" />
+                <button class="hud-btn" type="button">Link</button>
+            </div>
+            <div class="hud-status">Enter code (e.g. 000) or API key</div>
+        </div>
+    `;
+
+    (document.body || document.documentElement).appendChild(host);
+
+    const input = shadow.querySelector('.hud-input');
+    const btn = shadow.querySelector('.hud-btn');
+    const closeBtn = shadow.querySelector('.hud-close');
+    const status = shadow.querySelector('.hud-status');
+
+    setTimeout(() => input.focus(), 60);
+
+    closeBtn.onclick = () => host.remove();
+
+    const doSync = () => {
+        const val = input.value.trim();
+        if (!val) {
+            status.innerHTML = '<span style="color:#f87171;">Please enter a code or key</span>';
+            return;
+        }
+
+        status.innerHTML = '<span style="color:#38bdf8;">Syncing keys...</span>';
+        btn.disabled = true;
+
+        chrome.runtime.sendMessage({
+            action: 'syncByCode',
+            code: val
+        }, (res) => {
+            btn.disabled = false;
+            if (res && res.success) {
+                status.innerHTML = `<span style="color:#4ade80;font-weight:600;">✓ Synced (${res.count || 1} key${(res.count || 1) > 1 ? 's' : ''})</span>`;
+                input.style.borderColor = '#4ade80';
+                setTimeout(() => {
+                    host.style.transition = 'opacity 0.25s, transform 0.25s';
+                    host.style.opacity = '0';
+                    host.style.transform = 'translateY(-6px)';
+                    setTimeout(() => host.remove(), 260);
+                }, 1100);
+            } else {
+                status.innerHTML = `<span style="color:#f87171;">✕ ${res?.error || 'Sync failed'}</span>`;
+            }
+        });
+    };
+
+    btn.onclick = doSync;
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation();
+            doSync();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            e.stopPropagation();
+            host.remove();
+        }
+    });
+}
+
 // Function to extract code from snippets
 function extractSnippets() {
     const headerContainer = Array.from(document.querySelectorAll('div[aria-labelledby="tt-header"]'))
@@ -1216,6 +1409,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message.action === 'solveIamneoExamly') {
         solveIamneoExamly();
+    }
+    if (message.action === 'toggleSyncCodeHUD') {
+        toggleSyncCodeHUD();
     }
 });
 
