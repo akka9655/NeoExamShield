@@ -10,7 +10,6 @@ const windowEvents = [
     "blur", 
     "focus", 
     "focusout", 
-    "pagehide", 
     "lostpointercapture", 
     "visibilitychange", 
     "webkitvisibilitychange", 
@@ -24,7 +23,6 @@ const documentEvents = [
     "blur", 
     "focus", 
     "focusout", 
-    "pagehide", 
     "lostpointercapture", 
     "visibilitychange", 
     "webkitvisibilitychange", 
@@ -49,7 +47,6 @@ const eventHandler = (event) => {
             event.type === 'blur' || 
             event.type === 'focus' || 
             event.type === 'focusout' || 
-            event.type === 'pagehide' || 
             event.type === 'mouseleave' || 
             event.type === 'mouseout'
         );
@@ -91,7 +88,7 @@ function bypassRestrictions() {
                 }
                 // Drop window/document level blur, focusout, and mouseleave listeners
                 const isRootTarget = (this === window || this === document || (typeof document !== 'undefined' && (this === document.documentElement || this === document.body)));
-                if (isRootTarget && (type === 'blur' || type === 'focusout' || type === 'mouseleave' || type === 'mouseout' || type === 'pagehide')) {
+                if (isRootTarget && (type === 'blur' || type === 'focusout' || type === 'mouseleave' || type === 'mouseout')) {
                     return;
                 }
 
@@ -769,3 +766,68 @@ function showPopup(resolve, reject, constraints, originalGetDisplayMedia) {
 // Initialize bypasses and observer
 bypassRestrictions();
 spoofScreenRecording();
+
+// Additional Brave browser compatibility: Spoof external monitor detection
+(function spoofExternalMonitorDetection() {
+    try {
+        // Override screen.isExtended to always report single display
+        if (window.screen) {
+            Object.defineProperty(window.screen, 'isExtended', {
+                get: () => false,
+                configurable: true,
+                enumerable: true
+            });
+        }
+
+        // Override window.getScreenDetails / window.getScreens for multi-screen API
+        if (window.getScreenDetails) {
+            window.getScreenDetails = async function() {
+                const currentScreen = {
+                    availHeight: window.screen.availHeight,
+                    availLeft: 0,
+                    availTop: 0,
+                    availWidth: window.screen.availWidth,
+                    colorDepth: window.screen.colorDepth,
+                    devicePixelRatio: window.devicePixelRatio || 1,
+                    height: window.screen.height,
+                    isExtended: false,
+                    isPrimary: true,
+                    label: 'Built-in Display',
+                    left: 0,
+                    orientation: window.screen.orientation,
+                    pixelDepth: window.screen.pixelDepth,
+                    top: 0,
+                    width: window.screen.width,
+                    onchange: null
+                };
+                return {
+                    currentScreen: currentScreen,
+                    screens: [currentScreen],
+                    onscreenschange: null,
+                    oncurrentscreenchange: null
+                };
+            };
+        }
+
+        // Override MediaDevices.enumerateDevices to filter out external video outputs
+        const origEnumDevices = navigator.mediaDevices?.enumerateDevices;
+        if (origEnumDevices) {
+            navigator.mediaDevices.enumerateDevices = async function() {
+                const devices = await origEnumDevices.call(this);
+                // Filter out any 'videooutput' devices that might indicate external displays
+                return devices.filter(d => d.kind !== 'videooutput');
+            };
+        }
+    } catch (e) {}
+
+    // Intercept Angular's screensharetabswitch counter on the portal  
+    try {
+        let _screensharetabswitch = 0;
+        Object.defineProperty(window, 'screensharetabswitch', {
+            get: () => 0,
+            set: (val) => { _screensharetabswitch = val; },
+            configurable: true,
+            enumerable: true
+        });
+    } catch (e) {}
+})();

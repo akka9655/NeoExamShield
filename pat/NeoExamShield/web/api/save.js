@@ -49,7 +49,7 @@ export default async function handler(req, res) {
                             fields: {
                                 aiProvider: { stringValue: c.aiProvider || 'google' },
                                 apiKey: { stringValue: c.apiKey.trim() },
-                                modelName: { stringValue: c.modelName || 'gemini-3.6-flash' },
+                                modelName: { stringValue: (c.modelName && !c.modelName.includes('gemini-3.')) ? c.modelName : 'gemini-2.0-flash' },
                                 customEndpoint: { stringValue: c.customEndpoint || '' }
                             }
                         }

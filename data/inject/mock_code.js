@@ -27,6 +27,81 @@
                     });
                 }
 
+                // Bypass-only interceptors (Neo-Checker localhost ping & speed-test)
+                let bypassActive = true;
+                try {
+                    const bm = window.localStorage.getItem('neo_browser_bypass_mode');
+                    if (bm === 'off') bypassActive = false;
+                } catch(e) {}
+
+                if (bypassActive) {
+                    if (url.includes('speed-test.examly.io')) {
+                        const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                        return new Response(JSON.stringify({ success: true, ip: targetIp }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Intercept Neo-Checker / Neo Browser localhost ping (port 9999 or info/status)
+                    if ((url.includes(':9999') || url.includes('127.0.0.1') || url.includes('localhost') || url.includes('[::1]')) && url.includes('/info')) {
+                        return new Response("OK", {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'text/plain' }
+                        });
+                    }
+                    if ((url.includes(':9999') || url.includes('127.0.0.1') || url.includes('localhost') || url.includes('[::1]')) && url.includes('/status')) {
+                        const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                        const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                        const hash = isMac 
+                            ? "c3ca0fa8e426a37046e6c1804ab6870f6187ed5c7ca986bf0f01a7fe0a4825f3"
+                            : (isLinux 
+                                ? "1465e4220443af218a923bd5bf80af6349ccef2cabdc4964484b5e6350a58c79"
+                                : "d79e14a743710b354c614575930131ad52e3649d42e6a442e09a881ba2052e62");
+                        const payload = btoa(JSON.stringify({
+                            status: true,
+                            hash: hash,
+                            remote_desktop: false,
+                            active_processes: [],
+                            dual_screen: false
+                        }));
+                        return new Response(payload, {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'text/plain' }
+                        });
+                    }
+                }
+
+                    // Handle Neo Browser presence checks (neobrowser-present / neo-checker / hasNeoBrowser)
+                    if (url.includes('neobrowser-present') || url.includes('neo-checker') || url.includes('hasNeoBrowser') || url.includes('checkNeoBrowser')) {
+                        return new Response(JSON.stringify({ present: true, version: '2.0.10', status: 'running' }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Handle presentationAvailability / external monitor checks
+                    if (url.includes('hasExternalMonitor') || url.includes('presentationAvailability') || url.includes('dual-monitor') || url.includes('screen-check')) {
+                        return new Response(JSON.stringify({ hasExternalMonitor: false, dualScreen: false }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Handle SEB (Safe Exam Browser) config validation for portals that check it
+                    if (url.includes('validateSEBConfigKey') || url.includes('/api/validateSEBConfigKey')) {
+                        return new Response(JSON.stringify({ valid: true }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
                 // Intercept manifest.json request for official extension
                 if (url.includes('deojfdehldjjfmcjcfaojgaibalafifc') && url.includes('manifest.json')) {
                     return new Response(JSON.stringify(NEO_MOCK_MANIFEST), {
@@ -61,5 +136,98 @@
         }
     };
 
-    console.log('✅ Mock code fetch interceptor ready');
+    // Also hook XMLHttpRequest for Angular HttpClient compatibility
+    const origXHROpen = XMLHttpRequest.prototype.open;
+    const origXHRSend = XMLHttpRequest.prototype.send;
+    
+    XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        this._neoMockUrl = typeof url === 'string' ? url : (url && url.toString ? url.toString() : '');
+        return origXHROpen.call(this, method, url, ...rest);
+    };
+
+    XMLHttpRequest.prototype.send = function(body) {
+        const url = this._neoMockUrl || '';
+        let bypassActive = true;
+        try {
+            const bm = window.localStorage.getItem('neo_browser_bypass_mode');
+            if (bm === 'off') bypassActive = false;
+        } catch(e) {}
+
+        if (bypassActive && url) {
+            // Helper to dispatch mock XHR response
+            const dispatchMockResponse = (xhr, responseText) => {
+                try {
+                    Object.defineProperty(xhr, 'status', { value: 200, writable: true, configurable: true });
+                    Object.defineProperty(xhr, 'statusText', { value: 'OK', writable: true, configurable: true });
+                    Object.defineProperty(xhr, 'readyState', { value: 4, writable: true, configurable: true });
+                    Object.defineProperty(xhr, 'responseText', { value: responseText, writable: true, configurable: true });
+                    Object.defineProperty(xhr, 'response', { value: responseText, writable: true, configurable: true });
+                } catch(e) {}
+                setTimeout(() => {
+                    try {
+                        if (typeof xhr.onreadystatechange === 'function') xhr.onreadystatechange(new Event('readystatechange'));
+                        xhr.dispatchEvent(new Event('readystatechange'));
+                        if (typeof xhr.onload === 'function') xhr.onload(new Event('load'));
+                        xhr.dispatchEvent(new Event('load'));
+                        if (typeof xhr.onloadend === 'function') xhr.onloadend(new Event('loadend'));
+                        xhr.dispatchEvent(new Event('loadend'));
+                    } catch(e) {}
+                }, 5);
+            };
+
+            // Extension validator
+            if (url.includes('extensionvalidator') || url.includes('pdf-validator')) {
+                dispatchMockResponse(this, JSON.stringify({ validation: true }));
+                return;
+            }
+
+            // Speed test
+            if (url.includes('speed-test.examly.io')) {
+                const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                dispatchMockResponse(this, JSON.stringify({ success: true, ip: targetIp }));
+                return;
+            }
+
+            // Localhost Neo Checker
+            const isLocalPort = url.includes(':9999') || url.includes('127.0.0.1') || url.includes('localhost') || url.includes('[::1]');
+            if (isLocalPort && url.includes('/info')) {
+                dispatchMockResponse(this, "OK");
+                return;
+            }
+            if (isLocalPort && url.includes('/status')) {
+                const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                const hash = isMac 
+                    ? "c3ca0fa8e426a37046e6c1804ab6870f6187ed5c7ca986bf0f01a7fe0a4825f3"
+                    : (isLinux 
+                        ? "1465e4220443af218a923bd5bf80af6349ccef2cabdc4964484b5e6350a58c79"
+                        : "d79e14a743710b354c614575930131ad52e3649d42e6a442e09a881ba2052e62");
+                const payload = btoa(JSON.stringify({
+                    status: true,
+                    hash: hash,
+                    remote_desktop: false,
+                    active_processes: [],
+                    dual_screen: false
+                }));
+                dispatchMockResponse(this, payload);
+                return;
+            }
+
+            // SEB config validation
+            if (url.includes('validateSEBConfigKey')) {
+                dispatchMockResponse(this, JSON.stringify({ valid: true }));
+                return;
+            }
+
+            // Manifest fetch for official extension
+            if (url.includes('deojfdehldjjfmcjcfaojgaibalafifc') && url.includes('manifest.json')) {
+                dispatchMockResponse(this, JSON.stringify(NEO_MOCK_MANIFEST));
+                return;
+            }
+        }
+
+        return origXHRSend.call(this, body);
+    };
+
+    console.log('✅ Mock code fetch + XHR interceptors ready');
 })();

@@ -198,6 +198,119 @@
             font-weight: 600;
         }
 
+        .bypass-section {
+            width: 100%;
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #F8FAFC;
+            border: 1px solid #E2E8F0;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .bypass-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #334155;
+        }
+
+        .badge-chrome {
+            background: #ECFDF5;
+            color: #059669;
+            border: 1px solid #A7F3D0;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 800;
+        }
+
+        .badge-neobrowser {
+            background: #F5F3FF;
+            color: #7C3AED;
+            border: 1px solid #DDD6FE;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 800;
+        }
+
+        .badge-off {
+            background: #F1F5F9;
+            color: #64748B;
+            border: 1px solid #E2E8F0;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.65rem;
+            font-weight: 800;
+        }
+
+        .bypass-button-group {
+            display: flex;
+            gap: 4px;
+            width: 100%;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 5px 2px;
+            font-size: 0.65rem;
+            font-weight: 700;
+            border: 1px solid #CBD5E1;
+            border-radius: 6px;
+            background: #FFFFFF;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .mode-btn:hover {
+            border-color: #1686FF;
+            color: #1686FF;
+        }
+
+        .mode-btn.active-chrome {
+            background: #ECFDF5;
+            border-color: #059669;
+            color: #059669;
+        }
+
+        .mode-btn.active-neobrowser {
+            background: #F5F3FF;
+            border-color: #7C3AED;
+            color: #7C3AED;
+        }
+
+        .mode-btn.active-off {
+            background: #F1F5F9;
+            border-color: #64748B;
+            color: #334155;
+        }
+
+        .bypass-reload-btn {
+            width: 100%;
+            padding: 5px;
+            font-size: 0.68rem;
+            font-weight: 700;
+            background: #1686FF;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-top: 2px;
+            transition: background 0.15s ease;
+        }
+
+        .bypass-reload-btn:hover {
+            background: #0b6edb;
+        }
+
         .hidden { display: none !important; }
     </style>
 </head>
@@ -214,6 +327,20 @@
     <div id="syncStatus">Not Linked</div>
     <div id="error" class="hidden"></div>
 
+    <div class="bypass-section">
+        <div class="bypass-header">
+            <span class="bypass-label">Browser Identity</span>
+            <span id="bypassStatusBadge" class="badge-chrome">Chrome</span>
+        </div>
+        <div class="bypass-button-group">
+            <button type="button" id="setChromeModeBtn" class="mode-btn" title="Spoofs Google Chrome 128">Chrome</button>
+            <button type="button" id="setNeoModeBtn" class="mode-btn" title="Spoofs Neo Browser 2.0.10">NeoBrowser</button>
+            <button type="button" id="setOffModeBtn" class="mode-btn" title="Original Brave">Native</button>
+        </div>
+        <button type="button" id="reloadTabBtn" class="bypass-reload-btn hidden">↻ Reload Active Tab</button>
+        <div style="font-size:0.6rem;color:#94A3B8;text-align:center;">Shortcut: Alt + J</div>
+    </div>
+
     <div class="footer-links">
         <button type="button" class="footer-link" id="showShortcuts">Shortcuts</button>
         <button type="button" class="footer-link hidden" id="logoutButton">Logout</button>
@@ -227,12 +354,28 @@
             <button type="button" id="closeShortcuts">✕ Close</button>
         </div>
         <div class="shortcut-item">
+            <span class="shortcut-desc">Sync Code HUD</span>
+            <span class="shortcut-key">Alt + K</span>
+        </div>
+        <div class="shortcut-item">
             <span class="shortcut-desc">Auto MCQ</span>
             <span class="shortcut-key">Alt + A</span>
         </div>
         <div class="shortcut-item">
             <span class="shortcut-desc">Auto Code</span>
             <span class="shortcut-key">Alt + T</span>
+        </div>
+        <div class="shortcut-item">
+            <span class="shortcut-desc">Quick Ans HUD</span>
+            <span class="shortcut-key">Alt + M</span>
+        </div>
+        <div class="shortcut-item">
+            <span class="shortcut-desc">Browser Bypass</span>
+            <span class="shortcut-key">Alt + J</span>
+        </div>
+        <div class="shortcut-item">
+            <span class="shortcut-desc">Hide All HUDs</span>
+            <span class="shortcut-key">Alt + ,</span>
         </div>
         <div class="shortcut-item">
             <span class="shortcut-desc">AI Chatbot</span>

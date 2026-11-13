@@ -17,42 +17,172 @@ if (typeof window.isMac === 'undefined') {
   let isRandomTypingActive = false;
   let lastQuestionIdentifier = null;
 
-  // Find the answer Ace editor on the page (only the editable answer editor)
+  // Helper to ensure an editor element is strictly the center answer editor and NEVER a header or footer snippet editor
+  function isStrictAnswerEditor(el) {
+    if (!el) return false;
+    const id = (el.id || '').toLowerCase();
+    if (id.includes('header') || id.includes('footer')) return false;
+    if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
+      return false;
+    }
+    return true;
+  }
+
+  // Find the answer editor on the page (supports Ace, CodeMirror 6, Monaco, Textarea)
   function findAnswerEditor() {
-    // Check 1: Explicit answer editor ID, aria label, or container
-    const answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
-    if (answerEl) {
-      if (answerEl.env && answerEl.env.editor) return answerEl.env.editor;
-      if (typeof ace !== 'undefined') {
-        try {
-          const ed = ace.edit(answerEl.id || answerEl);
-          if (ed) return ed;
-        } catch(e) {}
+    const aceObj = (typeof ace !== 'undefined') ? ace : (window.ace || document.defaultView?.ace);
+
+    // Check 1: Explicit center answer editor container, ID, or aria label (PSG PAT / Examly / Iamneo)
+    const answerElCandidates = [
+      document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
+      document.querySelector('[id*="ttAnswerEditor"]'),
+      document.querySelector('[aria-labelledby="editor-answer"]'),
+      document.querySelector('.answer-content .ace_editor'),
+      document.querySelector('#programming-editor .ace_editor')
+    ];
+
+    for (const answerEl of answerElCandidates) {
+      if (answerEl && isStrictAnswerEditor(answerEl)) {
+        if (answerEl.env && answerEl.env.editor) return answerEl.env.editor;
+        const childAce = answerEl.querySelector?.('.ace_editor');
+        if (childAce?.env?.editor && isStrictAnswerEditor(childAce)) return childAce.env.editor;
+        if (aceObj) {
+          try {
+            const ed = aceObj.edit(answerEl.id || answerEl);
+            if (ed) return ed;
+          } catch(e) {}
+        }
       }
     }
-    // Fallback: find first non-readonly ACE editor
-    if (typeof ace !== 'undefined') {
-      const editors = document.querySelectorAll('.ace_editor');
-      for (const el of editors) {
-        try {
-          const ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
-          if (ed && !ed.getReadOnly()) return ed;
-        } catch(e) {}
-      }
+
+    // Check 2: First non-readonly ACE editor (skipping all Header and Footer snippet editors)
+    const aceEditors = document.querySelectorAll('.ace_editor');
+    for (const el of aceEditors) {
+      try {
+        if (!isStrictAnswerEditor(el)) continue;
+        const ed = (el.env && el.env.editor) ? el.env.editor : (aceObj ? aceObj.edit(el.id || el) : null);
+        if (ed && typeof ed.setValue === 'function' && !ed.getReadOnly()) return ed;
+      } catch(e) {}
     }
+
+    // Check 3: Modern CodeMirror 6 editor (used in new Iamneo / PAT portal UI in new m.md)
+    const cmContent = document.querySelector('#programming-editor .cm-content, .cm-editor .cm-content, .cm-content[contenteditable="true"]');
+    if (cmContent) {
+      const cmEditor = cmContent.closest('.cm-editor') || cmContent;
+      return {
+        isCodeMirror6: true,
+        element: cmContent,
+        getReadOnly: () => cmContent.getAttribute('contenteditable') === 'false',
+        setValue: function(code) {
+          const view = cmEditor.cmView?.view || cmContent.cmView?.view || cmEditor._view;
+          if (view && view.dispatch && view.state) {
+            try {
+              view.dispatch({
+                changes: { from: 0, to: view.state.doc.length, insert: code },
+                selection: { anchor: code.length }
+              });
+              return;
+            } catch(e) {}
+          }
+
+          // Fallback via DOM selection & execCommand
+          try {
+            cmContent.focus();
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(cmContent);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            let ok = false;
+            try {
+              ok = document.execCommand('insertText', false, code);
+            } catch(e) {}
+            if (!ok) {
+              cmContent.textContent = code;
+              cmContent.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: code }));
+            }
+            cmContent.dispatchEvent(new Event('input', { bubbles: true }));
+            cmContent.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch(e) {}
+        },
+        clearSelection: function() {
+          const sel = window.getSelection();
+          if (sel && sel.removeAllRanges) sel.removeAllRanges();
+        },
+        navigateFileEnd: function() {
+          try {
+            cmContent.focus();
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(cmContent);
+            range.collapse(false);
+            sel.removeAllRanges();
+            sel.addRange(range);
+          } catch(e) {}
+        },
+        focus: function() {
+          try { cmContent.focus(); } catch(e) {}
+        },
+        insert: function(ch) {
+          const view = cmEditor.cmView?.view || cmContent.cmView?.view;
+          if (view && view.dispatch && view.state) {
+            try {
+              const pos = view.state.selection.main.head;
+              view.dispatch({
+                changes: { from: pos, to: pos, insert: ch },
+                selection: { anchor: pos + ch.length }
+              });
+              return;
+            } catch(e) {}
+          }
+          try {
+            document.execCommand('insertText', false, ch);
+            cmContent.dispatchEvent(new Event('input', { bubbles: true }));
+          } catch(e) {}
+        }
+      };
+    }
+
+    // Check 4: Monaco Editor
+    if (window.monaco && window.monaco.editor) {
+      try {
+        const monacoModels = window.monaco.editor.getModels();
+        if (monacoModels && monacoModels.length > 0) {
+          const model = monacoModels[monacoModels.length - 1];
+          return {
+            isMonaco: true,
+            model: model,
+            getReadOnly: () => false,
+            setValue: function(code) { model.setValue(code); },
+            clearSelection: function() {},
+            navigateFileEnd: function() {},
+            focus: function() {
+              const el = document.querySelector('.monaco-editor');
+              if (el) el.focus();
+            },
+            insert: function(ch) {
+              const val = model.getValue();
+              model.setValue(val + ch);
+            }
+          };
+        }
+      } catch(e) {}
+    }
+
     return null;
   }
 
   // Get unique identifier for the currently displayed question
   function getQuestionIdentifier() {
     const qEl = document.querySelector('div[aria-labelledby="question-data"]') ||
+                document.querySelector('.rich-text-content, div[class*="rich-text-content"]') ||
                 document.querySelector('#content-left content-left testtaking-question') ||
                 document.querySelector('.qaas-block-question-title') ||
                 document.querySelector('[aria-labelledby="code-constraints"]');
     if (qEl) {
       return (qEl.innerText || qEl.textContent || '').slice(0, 120).trim();
     }
-    const qNumEl = document.querySelector('div.t-whitespace-nowrap') || document.querySelector('.question-number');
+    const qNumEl = document.querySelector('div.t-whitespace-nowrap') || document.querySelector('.question-number') || document.querySelector('[id*="question-nav"]');
     return qNumEl ? (qNumEl.innerText || qNumEl.textContent || '').trim() : null;
   }
 
@@ -107,18 +237,28 @@ if (typeof window.isMac === 'undefined') {
     let inString = false;
     let inChar = false;
 
+    function isEscaped(str, index) {
+      let count = 0;
+      let j = index - 1;
+      while (j >= 0 && str[j] === '\\') {
+        count++;
+        j--;
+      }
+      return count % 2 === 1;
+    }
+
     while (i < code.length) {
       const ch = code[i];
       const next = i + 1 < code.length ? code[i + 1] : '';
 
-      if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+      if (!inChar && (ch === '"') && !isEscaped(code, i)) {
         inString = !inString;
         result += ch;
         i++;
         continue;
       }
 
-      if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+      if (!inString && (ch === "'") && !isEscaped(code, i)) {
         inChar = !inChar;
         result += ch;
         i++;
@@ -176,26 +316,347 @@ if (typeof window.isMac === 'undefined') {
     return finalLines.join('\n').trim();
   }
 
-  // Fast Instant code insertion into Ace editor (Alt+T)
-  window._neopassStartTyping = function(codeToType) {
+  // Robust extractor: extracts EXACTLY ONE single solution code, never concatenates multiple blocks or test cases
+  function extractSingleCleanCode(rawResponse, programmingLanguage = '') {
+    if (!rawResponse) return '';
+    let text = String(rawResponse).trim();
+
+    const blockRegex = /```([a-zA-Z0-9_+-]+)?\s*\n?([\s\S]*?)```/g;
+    const blocks = [];
+    let match;
+    while ((match = blockRegex.exec(text)) !== null) {
+      const langTag = (match[1] || '').toLowerCase().trim();
+      const content = match[2].trim();
+      if (content) {
+        blocks.push({ langTag, content, length: content.length });
+      }
+    }
+
+    let code = '';
+    if (blocks.length === 1) {
+      code = blocks[0].content;
+    } else if (blocks.length > 1) {
+      const lang = (programmingLanguage || '').toLowerCase().trim();
+
+      const langMatches = blocks.filter(b => {
+        if (!b.langTag) return false;
+        if (lang.includes('c++') || lang.includes('cpp')) return b.langTag === 'cpp' || b.langTag === 'c++';
+        if (lang === 'c') return b.langTag === 'c';
+        if (lang.includes('java') && !lang.includes('script')) return b.langTag === 'java';
+        if (lang.includes('python')) return b.langTag.includes('py');
+        return b.langTag.includes(lang) || lang.includes(b.langTag);
+      });
+
+      const isSubstantiveCode = (b) => {
+        const c = b.content;
+        if (c.length < 25) return false;
+        return /#include|int\s+main|void\s+|def\s+|class\s+|public\s+static|import\s+|printf|scanf|cout|cin|return|for\s*\(|while\s*\(|\{|\}/.test(c);
+      };
+
+      const codeCandidates = (langMatches.length > 0 ? langMatches : blocks).filter(isSubstantiveCode);
+
+      if (codeCandidates.length > 0) {
+        codeCandidates.sort((a, b) => b.length - a.length);
+        code = codeCandidates[0].content;
+      } else if (langMatches.length > 0) {
+        code = langMatches[0].content;
+      } else {
+        blocks.sort((a, b) => b.length - a.length);
+        code = blocks[0].content;
+      }
+    } else {
+      code = text.replace(/^```[a-zA-Z0-9_+-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
+      const lines = code.split('\n');
+      let firstCodeLineIdx = -1;
+      const codeStartPattern = /^\s*(?:#include|#define|import\s+|package\s+|public\s+|class\s+|def\s+|int\s+|void\s+|using\s+namespace|func\s+|<\?php|const\s+|let\s+|var\s+)/;
+      for (let idx = 0; idx < lines.length; idx++) {
+        if (codeStartPattern.test(lines[idx])) {
+          firstCodeLineIdx = idx;
+          break;
+        }
+      }
+      if (firstCodeLineIdx > 0 && firstCodeLineIdx <= 5) {
+        code = lines.slice(firstCodeLineIdx).join('\n');
+      }
+    }
+
+    code = code.replace(/\r\n/g, '\n').trim();
+    return stripCodeComments(code).trim();
+  }
+
+  // Helper to remove any main() function definition (with balanced braces)
+  function stripMainFunction(code) {
+    if (!code) return '';
+    let result = code;
+    let safetyCounter = 0;
+    while (safetyCounter++ < 5) {
+      const mainMatch = /(?:int|void)?\s*main\s*\([^)]*\)\s*\{/.exec(result);
+      if (!mainMatch) break;
+
+      const startIndex = mainMatch.index;
+      const braceStart = result.indexOf('{', startIndex);
+      if (braceStart === -1) break;
+
+      let depth = 1;
+      let endIndex = braceStart + 1;
+      while (endIndex < result.length && depth > 0) {
+        const ch = result[endIndex];
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        endIndex++;
+      }
+
+      const before = result.substring(0, startIndex).trim();
+      const after = result.substring(endIndex).trim();
+      result = [before, after].filter(Boolean).join('\n\n').trim();
+    }
+    return result.trim();
+  }
+
+  // Ensures only the center part of the code is inserted (removes headers/main if header/footer provided)
+  function cleanCenterCode(cleanedCode, headerSnippet = '', footerSnippet = '') {
+    if (!cleanedCode) return '';
+    let result = cleanedCode;
+    const hasHeader = Boolean(headerSnippet && headerSnippet.trim().length > 0);
+    const hasFooter = Boolean(footerSnippet && footerSnippet.trim().length > 0);
+    const footerHasMain = Boolean(hasFooter && /\bmain\s*\(/.test(footerSnippet));
+    const headerHasMain = Boolean(hasHeader && /\bmain\s*\(/.test(headerSnippet));
+
+    // If footer has main (or three-part split exists), remove main() from center code
+    if (footerHasMain || headerHasMain || (hasHeader && hasFooter)) {
+      result = stripMainFunction(result);
+    }
+
+    // If header exists, strip duplicate struct/class declarations, #defines, and #includes
+    if (hasHeader) {
+      const typeRegex = /(?:typedef\s+)?(?:struct|class)\s+([a-zA-Z0-9_]+)\s*\{/g;
+      let tm;
+      while ((tm = typeRegex.exec(headerSnippet)) !== null) {
+        const typeName = tm[1];
+        const re = new RegExp(`(?:typedef\\s+)?(?:struct|class)\\s+${typeName}\\s*\\{[\\s\\S]*?\\}(?:\\s*[a-zA-Z0-9_]+)?;?`, 'g');
+        result = result.replace(re, '').trim();
+      }
+
+      const headerDefines = headerSnippet.split('\n').filter(l => l.trim().startsWith('#define'));
+      for (const def of headerDefines) {
+        const trimmedDef = def.trim();
+        result = result.split('\n').filter(l => l.trim() !== trimmedDef).join('\n').trim();
+      }
+
+      const headerIncludes = headerSnippet.split('\n').filter(l => l.trim().startsWith('#include'));
+      for (const inc of headerIncludes) {
+        const trimmedInc = inc.trim();
+        result = result.split('\n').filter(l => l.trim() !== trimmedInc).join('\n').trim();
+      }
+    }
+
+    return result.trim();
+  }
+
+  // Pure code cleaner: extract exactly ONE clean solution code, strip markdown fences and comments, and enforce center code only
+  function cleanPureCode(raw, programmingLanguage = '', headerSnippet = '', footerSnippet = '') {
+    if (!raw) return '';
+    let code = extractSingleCleanCode(raw, programmingLanguage);
+    return cleanCenterCode(code, headerSnippet, footerSnippet);
+  }
+
+  // Bridge for content script to get 100% full un-virtualized editor snippets from MAIN world
+  function getFullEditorSnippets() {
+    const aceObj = (typeof ace !== 'undefined') ? ace : (window.ace || document.defaultView?.ace);
+    function getVal(el) {
+      if (!el) return '';
+      try {
+        if (el.env && el.env.editor && typeof el.env.editor.getValue === 'function') {
+          return el.env.editor.getValue().trim();
+        }
+        if (aceObj && typeof aceObj.edit === 'function') {
+          const ed = aceObj.edit(el.id || el);
+          if (ed && typeof ed.getValue === 'function') return ed.getValue().trim();
+        }
+      } catch(e) {}
+      const lines = el.querySelectorAll('.ace_line');
+      if (lines && lines.length > 0) return Array.from(lines).map(l => l.textContent).join('\n').trim();
+      return (el.innerText || el.textContent || '').trim();
+    }
+
+    const headerEl = document.querySelector('[id*="ttHeaderEditor"], [id*="HeaderEditor"], [id*="headerEditor"], [aria-labelledby="tt-header"] .ace_editor, .header-content .ace_editor');
+    const footerEl = document.querySelector('[id*="ttFooterEditor"], [id*="FooterEditor"], [id*="footerEditor"], [aria-labelledby="footer"] .ace_editor, .footer-content .ace_editor');
+    const centerEl = document.querySelector('div[aria-labelledby="answer"] .ace_editor, [id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], .answer-content .ace_editor');
+
+    return {
+      headerSnippet: getVal(headerEl),
+      footerSnippet: getVal(footerEl),
+      starterCode: getVal(centerEl)
+    };
+  }
+
+  // Handle sync bridge request from isolated content.js
+  document.addEventListener('neoGetMainSnippets', function() {
+    try {
+      const snippets = getFullEditorSnippets();
+      let bridgeEl = document.getElementById('neo-snippets-data');
+      if (!bridgeEl) {
+        bridgeEl = document.createElement('div');
+        bridgeEl.id = 'neo-snippets-data';
+        bridgeEl.style.display = 'none';
+        (document.body || document.documentElement).appendChild(bridgeEl);
+      }
+      bridgeEl.textContent = JSON.stringify(snippets);
+    } catch(e) {}
+  });
+
+  // Comprehensive editor sync helper (propagates code to Ace session, Angular model, and DOM cleanly without duplicate pasting)
+  function syncEditorValue(ed, code) {
+    if (!ed) return;
+    try {
+      if (typeof ed.setValue === 'function') {
+        ed.setValue(code, 1);
+      }
+      if (typeof ed.clearSelection === 'function') {
+        ed.clearSelection();
+      }
+      if (typeof ed.navigateFileEnd === 'function') {
+        ed.navigateFileEnd();
+      }
+      if (typeof ed.focus === 'function') {
+        try { ed.focus(); } catch(e) {}
+      }
+
+      // Ace Editor specific safe handling:
+      if (ed.session) {
+        if (ed.renderer && typeof ed.renderer.updateFull === 'function') {
+          try { ed.renderer.updateFull(true); } catch(e) {}
+        }
+        // Reset Ace's internal keyboard buffer to prevent duplicate insertion
+        if (ed.textInput && typeof ed.textInput.getElement === 'function') {
+          const inputEl = ed.textInput.getElement();
+          if (inputEl) {
+            inputEl.value = '';
+          }
+        }
+      }
+
+      // Notify container element for Angular / React / Vue form binding without triggering Ace's hidden TextInput listener
+      const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor, #programming-editor');
+      if (containerEl) {
+        try {
+          containerEl.dispatchEvent(new Event('input', { bubbles: true }));
+          containerEl.dispatchEvent(new Event('change', { bubbles: true }));
+        } catch(e) {}
+      }
+
+      // Plain textarea fallback (strictly for non-Ace native textareas, never touch .ace_text-input or .inputarea)
+      if (!ed.session && !ed.isCodeMirror6 && !ed.isMonaco) {
+        const plainTextareas = document.querySelectorAll('textarea:not(.ace_text-input):not(.inputarea)');
+        plainTextareas.forEach(t => {
+          try {
+            t.value = code;
+            t.dispatchEvent(new Event('input', { bubbles: true }));
+            t.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch(e) {}
+        });
+      }
+    } catch(e) {}
+  }
+
+  // Pre-submit, pre-pause, and pre-compile flush function: sync container without re-inserting or duplicating code
+  window._neoExamShieldFlushEditorCode = function() {
+    try {
+      const ed = findAnswerEditor();
+      if (ed) {
+        const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor, #programming-editor');
+        if (containerEl) {
+          try {
+            containerEl.dispatchEvent(new Event('input', { bubbles: true }));
+            containerEl.dispatchEvent(new Event('change', { bubbles: true }));
+          } catch(e) {}
+        }
+      }
+    } catch(e) {}
+  };
+  window.addEventListener('neoFlushEditor', window._neoExamShieldFlushEditorCode);
+  document.addEventListener('neoFlushEditor', window._neoExamShieldFlushEditorCode);
+
+  // Directly capture submit, compile, and pause clicks in MAIN world before Angular/portal handlers run
+  document.addEventListener('click', function(event) {
+    try {
+      const target = event.target;
+      if (!target) return;
+      const btn = (target.closest ? target.closest('button, [role="button"], a, div.btn-container, div.submission, [id*="submit"], [id*="pause"]') : null);
+      const targetId = ((target.id || '') + ' ' + (btn && btn.id ? btn.id : '')).toLowerCase();
+      const targetText = ((target.innerText || target.textContent || '') + ' ' + (btn ? (btn.innerText || btn.textContent || '') : '')).trim().toLowerCase();
+      const targetAria = (((target.getAttribute && target.getAttribute('aria-labelledby')) || '') + ' ' + 
+                          ((target.getAttribute && target.getAttribute('aria-label')) || '') + ' ' +
+                          (btn && btn.getAttribute && (btn.getAttribute('aria-labelledby') || btn.getAttribute('aria-label')) || '')).toLowerCase();
+      const targetClass = ((target.className || '') + ' ' + (btn && btn.className ? btn.className : '')).toLowerCase();
+
+      // Submit actions (Submit Test, Submit Code, Yes / Confirm in submit modal)
+      const isSubmit = targetId.includes('submit') ||
+                       targetText.includes('submit test') ||
+                       targetText.includes('submit code') ||
+                       targetText.includes('yes, submit') ||
+                       targetText.includes('submit answer') ||
+                       targetText.includes('end test') ||
+                       targetAria.includes('submit') ||
+                       targetClass.includes('submission') ||
+                       targetText === 'yes' ||
+                       targetText === 'submit';
+
+      // Compile/run code actions
+      const isCompile = targetId.includes('compile') ||
+                        targetText.includes('compile') ||
+                        targetText.includes('run code');
+
+      // Pause actions
+      const isPause = targetId.includes('pause') ||
+                      targetText.includes('pause') ||
+                      targetAria.includes('pause') ||
+                      targetClass.includes('pause');
+
+      if (isSubmit || isCompile || isPause) {
+        window._neoExamShieldFlushEditorCode();
+      }
+    } catch(e) {}
+  }, true);
+
+  // Fast Instant code insertion into editor (Alt+T)
+  window._neopassStartTyping = function(codeToType, programmingLanguage = '', headerSnippet = '', footerSnippet = '') {
     if (!codeToType) return;
     window._neoStopTyping(); // Stop any pending random typing
-    const cleanCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
+
+    // Auto-detect header/footer from live page if not explicitly supplied
+    if (!headerSnippet || !footerSnippet) {
+      try {
+        const snips = getFullEditorSnippets();
+        headerSnippet = headerSnippet || snips.headerSnippet;
+        footerSnippet = footerSnippet || snips.footerSnippet;
+      } catch(e) {}
+    }
+
+    const cleanCode = cleanPureCode(codeToType, programmingLanguage, headerSnippet, footerSnippet);
     const found = findAnswerEditor();
     if (found) {
       try {
         editor = found;
-        editor.setValue(cleanCode, 1);
-        editor.clearSelection();
-        editor.navigateFileEnd();
+        syncEditorValue(editor, cleanCode);
       } catch (error) {}
     }
   };
 
   // Initialize Random Key Press Typing Mode (Alt+X)
-  window._neoExamShieldInitRandomTyping = function(codeToType) {
+  window._neoExamShieldInitRandomTyping = function(codeToType, headerSnippet = '', footerSnippet = '') {
     if (!codeToType) return;
-    currentCode = stripCodeComments(codeToType.replace(/\r\n/g, '\n')).trim();
+
+    // Auto-detect header/footer from live page if not explicitly supplied
+    if (!headerSnippet || !footerSnippet) {
+      try {
+        const snips = getFullEditorSnippets();
+        headerSnippet = headerSnippet || snips.headerSnippet;
+        footerSnippet = footerSnippet || snips.footerSnippet;
+      } catch(e) {}
+    }
+
+    currentCode = cleanPureCode(codeToType, '', headerSnippet, footerSnippet);
     charIndex = 0;
     isRandomTypingActive = true;
     lastQuestionIdentifier = getQuestionIdentifier();
@@ -236,8 +697,8 @@ if (typeof window.isMac === 'undefined') {
     event.stopPropagation();
 
     if (charIndex < currentCode.length) {
+      const nextChar = currentCode[charIndex];
       charIndex++;
-      const partialCode = currentCode.substring(0, charIndex);
 
       if (!editor) {
         editor = findAnswerEditor();
@@ -245,17 +706,20 @@ if (typeof window.isMac === 'undefined') {
 
       if (editor) {
         try {
-          editor.setValue(partialCode, 1);
-          editor.clearSelection();
-          editor.navigateFileEnd();
+          if (charIndex === 1) {
+            editor.setValue(nextChar, 1);
+          } else {
+            editor.insert(nextChar);
+          }
         } catch(e) {
           try {
-            editor.insert(currentCode[charIndex - 1]);
+            editor.setValue(currentCode.substring(0, charIndex), 1);
           } catch(err) {}
         }
 
         if (charIndex >= currentCode.length) {
           isRandomTypingActive = false;
+          try { syncEditorValue(editor, currentCode); } catch(e) {}
           window.dispatchEvent(new CustomEvent('neoTypingComplete'));
         }
       } else {
@@ -263,6 +727,65 @@ if (typeof window.isMac === 'undefined') {
       }
     }
   }
+
+  // Defend against Examly calcTime null pointer crash when test is paused/resumed
+  function ensureTimerMediaElement() {
+    try {
+      if (!document.getElementById('active-tab-audio')) {
+        const aud = document.createElement('audio');
+        aud.id = 'active-tab-audio';
+        aud.src = 'https://images.examly.io/scripts/audio/race2.ogg';
+        aud.style.display = 'none';
+        (document.body || document.documentElement).appendChild(aud);
+      }
+    } catch(e) {}
+  }
+  ensureTimerMediaElement();
+  setInterval(ensureTimerMediaElement, 2500);
+
+  // Auto-save & restore code per question so pause / resume never loses student's written code
+  function setupCodeAutoPersistence() {
+    try {
+      const getActiveQKey = () => {
+        const url = window.location.href;
+        const qHeader = document.querySelector('div[aria-labelledby="question-no font16"], [aria-labelledby="question-no"]');
+        const qNum = qHeader ? qHeader.textContent.trim() : 'default';
+        return `neo_saved_code_${encodeURIComponent(url)}_${encodeURIComponent(qNum)}`;
+      };
+
+      // Periodic auto-backup of editor code
+      setInterval(() => {
+        try {
+          const ed = findAnswerEditor();
+          if (ed && typeof ed.getValue === 'function') {
+            const val = ed.getValue();
+            if (val && val.trim().length > 15 && !val.includes('// You are using GCC')) {
+              const key = getActiveQKey();
+              sessionStorage.setItem(key, val);
+            }
+          }
+        } catch(e) {}
+      }, 1500);
+
+      // Auto-restore on question mount if editor is empty or defaulted
+      setTimeout(() => {
+        try {
+          const key = getActiveQKey();
+          const saved = sessionStorage.getItem(key);
+          if (saved && saved.trim().length > 15) {
+            const ed = findAnswerEditor();
+            if (ed && typeof ed.getValue === 'function') {
+              const current = ed.getValue().trim();
+              if (!current || current === '// You are using GCC' || current.length < 10) {
+                syncEditorValue(ed, saved);
+              }
+            }
+          }
+        } catch(e) {}
+      }, 1000);
+    } catch(e) {}
+  }
+  setupCodeAutoPersistence();
 
   window.addEventListener('keydown', handleTypingKeydown, true);
   document.addEventListener('keydown', handleTypingKeydown, true);

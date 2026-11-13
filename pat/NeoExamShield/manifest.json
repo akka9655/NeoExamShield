@@ -37,12 +37,10 @@
     "clipboardRead",
     "storage",
     "scripting",
-    "downloads",
     "windows",
     "declarativeNetRequest",
     "declarativeNetRequestWithHostAccess",
-    "alarms",
-    "webRequest"
+    "alarms"
   ],
   "host_permissions": [
       "*://*/*"
@@ -64,6 +62,8 @@
         "http://*/*"
       ],
       "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": true,
       "js": [
         "data/inject/copyOverride.js",
         "data/inject/customPaste.js",
@@ -143,26 +143,12 @@
       },
       "description": "Solve MCQs"
     },
-    "nptel": {
-      "suggested_key": {
-        "default": "Alt+Comma",
-        "mac": "Alt+Comma"
-      },
-      "description": "nptel"
-    },
     "customPaste": {
       "suggested_key": {
         "default": "Alt+P",
         "mac": "Alt+P"
       },
       "description": "Paste using drag-and-drop when blocked"
-    },
-    "toggle-sync-code": {
-      "suggested_key": {
-        "default": "Alt+N",
-        "mac": "Alt+N"
-      },
-      "description": "Enter 3-digit sync code"
     }
   },
   "icons": {

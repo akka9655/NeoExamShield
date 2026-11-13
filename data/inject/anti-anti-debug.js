@@ -1,7 +1,539 @@
 !(() => {
-    const Proxy = window.Proxy;
-    const Object = window.Object;
-    const Array = window.Array;
+    // Save primordial object references at top of IIFE to avoid Temporal Dead Zone (TDZ)
+    const Proxy = window.Proxy || globalThis.Proxy;
+    const Object = window.Object || globalThis.Object;
+    const Array = window.Array || globalThis.Array;
+
+    // =========================================================================
+    // NeoExamShield: Browser Identity Bypass Engine (Alt + J)
+    // Disguises Brave / other browsers as Google Chrome or Neo Browser
+    // =========================================================================
+    function applyBrowserBypass(forcedMode) {
+        try {
+            let mode = forcedMode;
+            if (!mode) {
+                try {
+                    mode = window.localStorage.getItem('neo_browser_bypass_mode');
+                } catch (e) {
+                    mode = null;
+                }
+            }
+
+            // Default to 'off' (Native browser) - only activate when user turns on via Alt+J or HUD
+            if (!mode) {
+                mode = 'off';
+                try {
+                    window.localStorage.setItem('neo_browser_bypass_mode', 'off');
+                } catch (e) {}
+            }
+
+            // Only proceed if user switched to 'chrome' or 'neobrowser'
+            if (mode === 'off') {
+                return;
+            }
+
+            // 1. Hide Brave completely
+            try {
+                try { delete Navigator.prototype.brave; } catch (e) {}
+                try { delete navigator.brave; } catch (e) {}
+                try {
+                    Object.defineProperty(navigator, 'brave', {
+                        get: () => undefined,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: false
+                    });
+                } catch(e) {}
+                try {
+                    Object.defineProperty(Navigator.prototype, 'brave', {
+                        get: () => undefined,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: false
+                    });
+                } catch(e) {}
+            } catch (e) {}
+
+            // 2. Prepare target strings
+            const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+            const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+            const platformStr = isMac ? 'Macintosh; Intel Mac OS X 10_15_7' : (isLinux ? 'X11; Linux x86_64' : 'Windows NT 10.0; Win64; x64');
+            const secPlatform = isMac ? 'macOS' : (isLinux ? 'Linux' : 'Windows');
+            const targetOSVersion = isLinux ? "6.5.0" : (isMac ? "15.0.0" : "10.0.0");
+
+            let targetUA = '';
+            let targetAppVersion = '';
+            let targetBrands = [];
+
+            if (mode === 'neobrowser') {
+                targetUA = `Mozilla/5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 neo-browser/2.0.10`;
+                targetAppVersion = `5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 neo-browser/2.0.10`;
+                targetBrands = [
+                    { brand: "Neo Browser", version: "2" },
+                    { brand: "Neo Browser", version: "2.0.10" },
+                    { brand: "Google Chrome", version: "128" },
+                    { brand: "Chromium", version: "128" },
+                    { brand: "Not=A?Brand", version: "24" }
+                ];
+                window.neoCheckerPort = 9999;
+            } else {
+                // Pure Google Chrome Mode
+                targetUA = `Mozilla/5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36`;
+                targetAppVersion = `5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36`;
+                targetBrands = [
+                    { brand: "Google Chrome", version: "128" },
+                    { brand: "Chromium", version: "128" },
+                    { brand: "Not=A?Brand", version: "24" }
+                ];
+            }
+
+            // 3. Spoof navigator.userAgent & navigator.appVersion on BOTH navigator and Navigator.prototype
+            try { delete navigator.userAgent; } catch (e) {}
+            try { delete navigator.appVersion; } catch (e) {}
+
+            try {
+                Object.defineProperty(navigator, 'userAgent', {
+                    get: () => targetUA,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+            try {
+                Object.defineProperty(navigator, 'appVersion', {
+                    get: () => targetAppVersion,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            try {
+                Object.defineProperty(Navigator.prototype, 'userAgent', {
+                    get: () => targetUA,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+            try {
+                Object.defineProperty(Navigator.prototype, 'appVersion', {
+                    get: () => targetAppVersion,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            // 4. Spoof navigator.userAgentData on BOTH navigator and Navigator.prototype
+            const fakeUaData = {
+                brands: targetBrands,
+                mobile: false,
+                platform: secPlatform,
+                getHighEntropyValues: async function(hints) {
+                    return {
+                        brands: targetBrands,
+                        mobile: false,
+                        platform: secPlatform,
+                        platformVersion: targetOSVersion,
+                        architecture: "x86",
+                        bitness: "64",
+                        model: "",
+                        uaFullVersion: mode === 'chrome' ? "128.0.0.0" : "2.0.10",
+                        fullVersionList: targetBrands
+                    };
+                },
+                toJSON: function() {
+                    return {
+                        brands: targetBrands,
+                        mobile: false,
+                        platform: secPlatform
+                    };
+                }
+            };
+
+            try { delete navigator.userAgentData; } catch (e) {}
+
+            try {
+                Object.defineProperty(navigator, 'userAgentData', {
+                    get: () => fakeUaData,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+            try {
+                Object.defineProperty(Navigator.prototype, 'userAgentData', {
+                    get: () => fakeUaData,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            // 5. Ensure window.chrome is properly populated
+            if (!window.chrome) {
+                window.chrome = {};
+            }
+            if (!window.chrome.runtime) {
+                window.chrome.runtime = {};
+            }
+
+            // 6. Ensure window.opr is not set
+            try { delete window.opr; } catch (e) {}
+
+            // 7. Hook testService and client_data on Object.prototype to ensure
+            // "Collecting environment information" (Chunk 5120) always succeeds
+            try {
+                const targetBrowserName = (mode === 'chrome' ? 'Chrome' : 'Neo Browser');
+                const targetBrowserMajor = (mode === 'chrome' ? '128' : '2');
+                const targetBrowserVersion = (mode === 'chrome' ? '128.0.0.0' : '2.0.10');
+                const targetPlatform = isLinux ? 'Linux' : (isMac ? 'MacOS' : 'Windows');
+                const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+
+                function createSafeBrowserObject() {
+                    const bObj = {};
+                    Object.defineProperty(bObj, 'name', {
+                        get: () => targetBrowserName,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true
+                    });
+                    Object.defineProperty(bObj, 'major', {
+                        get: () => targetBrowserMajor,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true
+                    });
+                    Object.defineProperty(bObj, 'version', {
+                        get: () => targetBrowserVersion,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true
+                    });
+                    return bObj;
+                }
+
+                function createSafeOSObject() {
+                    const oObj = {};
+                    Object.defineProperty(oObj, 'name', {
+                        get: () => targetPlatform,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true
+                    });
+                    Object.defineProperty(oObj, 'version', {
+                        get: () => targetOSVersion,
+                        set: () => {},
+                        configurable: true,
+                        enumerable: true
+                    });
+                    return oObj;
+                }
+
+                function sanitizeClientData(cd) {
+                    if (!cd || typeof cd !== 'object') return;
+                    try {
+                        let _browser = createSafeBrowserObject();
+                        let _os = createSafeOSObject();
+                        let _ip = targetIp;
+
+                        Object.defineProperty(cd, 'browser', {
+                            get: () => _browser,
+                            set: (newB) => {
+                                if (newB && typeof newB === 'object') {
+                                    if (newB.name === 'Brave' || !newB.name) {
+                                        newB.name = targetBrowserName;
+                                    }
+                                    _browser = newB;
+                                }
+                            },
+                            configurable: true,
+                            enumerable: true
+                        });
+
+                        Object.defineProperty(cd, 'OS', {
+                            get: () => _os,
+                            set: (newOS) => {
+                                if (newOS && typeof newOS === 'object') {
+                                    if (!newOS.name || newOS.name === 'Unknown OS') {
+                                        newOS.name = targetPlatform;
+                                    }
+                                    _os = newOS;
+                                }
+                            },
+                            configurable: true,
+                            enumerable: true
+                        });
+
+                        Object.defineProperty(cd, 'Public_IP', {
+                            get: () => _ip,
+                            set: (newIp) => {
+                                if (newIp) _ip = newIp;
+                            },
+                            configurable: true,
+                            enumerable: true
+                        });
+                    } catch(e) {}
+                }
+
+                function hookTestServiceInstance(svc) {
+                    if (!svc || typeof svc !== 'object') return;
+                    if (svc._neoGetBasicDataHooked) return;
+                    svc._neoGetBasicDataHooked = true;
+
+                    const origGetBasicData = svc.getBasicData;
+                    svc.getBasicData = function(...args) {
+                        return new Promise((resolve) => {
+                            try {
+                                if (!this.testData) this.testData = {};
+                                if (!this.testData.client_data) {
+                                    this.testData.client_data = {
+                                        OS: { name: targetPlatform, version: targetOSVersion },
+                                        browser: { name: targetBrowserName, major: targetBrowserMajor, version: targetBrowserVersion },
+                                        Public_IP: targetIp,
+                                        answer_s3_link: "",
+                                        pdfName: ""
+                                    };
+                                }
+                                sanitizeClientData(this.testData.client_data);
+                            } catch (e) {}
+
+                            let promiseChain;
+                            if (typeof origGetBasicData === 'function') {
+                                try {
+                                    promiseChain = origGetBasicData.apply(this, args);
+                                } catch (e) {
+                                    promiseChain = Promise.resolve(true);
+                                }
+                            } else {
+                                promiseChain = Promise.resolve(true);
+                            }
+
+                            Promise.resolve(promiseChain).then(() => {
+                                try {
+                                    if (!this.testData) this.testData = {};
+                                    if (!this.testData.client_data) this.testData.client_data = {};
+                                    sanitizeClientData(this.testData.client_data);
+                                } catch (e) {}
+                                resolve(true);
+                            }).catch(() => {
+                                try {
+                                    if (!this.testData) this.testData = {};
+                                    if (!this.testData.client_data) this.testData.client_data = {};
+                                    sanitizeClientData(this.testData.client_data);
+                                } catch (e) {}
+                                resolve(true);
+                            });
+                        });
+                    };
+                }
+
+                // Object.prototype.testService hook for Angular components
+                try {
+                    Object.defineProperty(Object.prototype, 'testService', {
+                        configurable: true,
+                        enumerable: false,
+                        get() {
+                            return this.__neoTestServiceInstance;
+                        },
+                        set(val) {
+                            this.__neoTestServiceInstance = val;
+                            hookTestServiceInstance(val);
+                        }
+                    });
+                } catch (e) {}
+            } catch (e) {}
+
+            // 8. Spoof navigator.plugins (Brave returns empty, Chrome has PDF plugins)
+            try {
+                const fakePluginData = [
+                    { name: 'PDF Viewer', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                    { name: 'Chromium PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                    { name: 'Microsoft Edge PDF Viewer', filename: 'internal-pdf-viewer', description: '' },
+                    { name: 'WebKit built-in PDF', filename: 'internal-pdf-viewer', description: '' }
+                ];
+                const fakeMimeType = { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' };
+                
+                const fakePlugins = {
+                    length: fakePluginData.length,
+                    item: function(i) { return fakePluginData[i] || null; },
+                    namedItem: function(name) { return fakePluginData.find(p => p.name === name) || null; },
+                    refresh: function() {},
+                    [Symbol.iterator]: function*() { for (const p of fakePluginData) yield p; }
+                };
+                for (let i = 0; i < fakePluginData.length; i++) {
+                    fakePlugins[i] = fakePluginData[i];
+                }
+
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => fakePlugins,
+                    configurable: true,
+                    enumerable: true
+                });
+                Object.defineProperty(Navigator.prototype, 'plugins', {
+                    get: () => fakePlugins,
+                    configurable: true,
+                    enumerable: true
+                });
+
+                const fakeMimeTypes = {
+                    length: 1,
+                    item: function(i) { return i === 0 ? fakeMimeType : null; },
+                    namedItem: function(name) { return name === 'application/pdf' ? fakeMimeType : null; },
+                    [Symbol.iterator]: function*() { yield fakeMimeType; }
+                };
+                fakeMimeTypes[0] = fakeMimeType;
+
+                Object.defineProperty(navigator, 'mimeTypes', {
+                    get: () => fakeMimeTypes,
+                    configurable: true,
+                    enumerable: true
+                });
+                Object.defineProperty(Navigator.prototype, 'mimeTypes', {
+                    get: () => fakeMimeTypes,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            // 9. Spoof window.chrome.app, chrome.csi, chrome.loadTimes (Chrome-specific APIs Brave may lack)
+            try {
+                if (!window.chrome) window.chrome = {};
+                
+                if (!window.chrome.app) {
+                    window.chrome.app = {
+                        isInstalled: false,
+                        InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' },
+                        RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' },
+                        getDetails: function() { return null; },
+                        getIsInstalled: function() { return false; },
+                        installState: function(callback) { if (callback) callback('not_installed'); }
+                    };
+                }
+
+                if (!window.chrome.csi) {
+                    window.chrome.csi = function() {
+                        return { pageT: Date.now(), startE: Date.now(), onloadT: 0, tran: 15 };
+                    };
+                }
+
+                if (!window.chrome.loadTimes) {
+                    window.chrome.loadTimes = function() {
+                        return {
+                            commitLoadTime: Date.now() / 1000,
+                            connectionInfo: 'h2',
+                            finishDocumentLoadTime: Date.now() / 1000,
+                            finishLoadTime: Date.now() / 1000,
+                            firstPaintAfterLoadTime: 0,
+                            firstPaintTime: Date.now() / 1000,
+                            navigationType: 'Other',
+                            npnNegotiatedProtocol: 'h2',
+                            requestTime: Date.now() / 1000,
+                            startLoadTime: Date.now() / 1000,
+                            wasAlternateProtocolAvailable: false,
+                            wasFetchedViaSpdy: true,
+                            wasNpnNegotiated: true
+                        };
+                    };
+                }
+            } catch (e) {}
+
+            // 10. Spoof navigator.webdriver (should always be false in normal browser)
+            try {
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => false,
+                    configurable: true,
+                    enumerable: true
+                });
+                Object.defineProperty(Navigator.prototype, 'webdriver', {
+                    get: () => false,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            // 11. Hide dual screen / external display detection
+            try {
+                if (window.screen) {
+                    Object.defineProperty(window.screen, 'isExtended', {
+                        get: () => false,
+                        configurable: true,
+                        enumerable: true
+                    });
+                }
+            } catch (e) {}
+
+            // 12. Neutralize Presentation API external display detection
+            try {
+                if (navigator.presentation) {
+                    Object.defineProperty(navigator.presentation, 'defaultRequest', {
+                        get: () => null,
+                        set: () => {},
+                        configurable: true
+                    });
+                }
+                // Override PresentationAvailability to never report displays
+                if (typeof PresentationRequest !== 'undefined') {
+                    PresentationRequest.prototype.getAvailability = function() {
+                        return Promise.resolve({ value: false, onchange: null });
+                    };
+                }
+            } catch (e) {}
+
+            // 13. Prevent window.Brave and window.brave constructor detection
+            try {
+                Object.defineProperty(window, 'Brave', {
+                    get: () => undefined,
+                    set: () => {},
+                    configurable: true,
+                    enumerable: false
+                });
+            } catch (e) {}
+
+            // 14. Spoof navigator.connection for exam portal speed checks
+            try {
+                if (navigator.connection) {
+                    Object.defineProperty(navigator.connection, 'effectiveType', {
+                        get: () => '4g',
+                        configurable: true
+                    });
+                    Object.defineProperty(navigator.connection, 'downlink', {
+                        get: () => 10,
+                        configurable: true
+                    });
+                    Object.defineProperty(navigator.connection, 'rtt', {
+                        get: () => 50,
+                        configurable: true
+                    });
+                }
+            } catch (e) {}
+
+            // 15. Spoof navigator.pdfViewerEnabled (Chrome returns true, Brave may not)
+            try {
+                Object.defineProperty(navigator, 'pdfViewerEnabled', {
+                    get: () => true,
+                    configurable: true,
+                    enumerable: true
+                });
+                Object.defineProperty(Navigator.prototype, 'pdfViewerEnabled', {
+                    get: () => true,
+                    configurable: true,
+                    enumerable: true
+                });
+            } catch (e) {}
+
+            console.log(`🛡️ [NeoExamShield] Browser Identity Bypass active: ${mode}`);
+        } catch (err) {
+            console.error('🛡️ [NeoExamShield] Error applying browser bypass:', err);
+        }
+    }
+
+    // Apply bypass immediately on execution
+    applyBrowserBypass();
+
+    // Listen for live bypass mode changes
+    window.addEventListener('neoBrowserBypassChange', (ev) => {
+        if (ev && ev.detail && ev.detail.mode) {
+            applyBrowserBypass(ev.detail.mode);
+        }
+    });
+
     /**
      * Save original methods before we override them
      */
@@ -275,71 +807,323 @@
         };
     } catch (e) {}
 
-    // 2. Hook window.fetch to serve mock manifest, files & auto-validate integrity
+    // Network telemetry scrubbing helper (neutralizes tab-switch & proctoring counts)
+    function scrubViolationPayload(body) {
+        if (typeof body !== 'string') return body;
+        try {
+            let scrubbed = body;
+            scrubbed = scrubbed.replace(/"tabswitched"\s*:\s*\d+/g, '"tabswitched": 0');
+            scrubbed = scrubbed.replace(/"copyPasted"\s*:\s*\d+/g, '"copyPasted": 0');
+            scrubbed = scrubbed.replace(/"offScreen"\s*:\s*\d+/g, '"offScreen": 0');
+            scrubbed = scrubbed.replace(/\\"tabswitched\\"\s*:\s*\d+/g, '\\"tabswitched\\": 0');
+            scrubbed = scrubbed.replace(/\\"copyPasted\\"\s*:\s*\d+/g, '\\"copyPasted\\": 0');
+            scrubbed = scrubbed.replace(/\\"offScreen\\"\s*:\s*\d+/g, '\\"offScreen\\": 0');
+            scrubbed = scrubbed.replace(/"tabswitched"\s*:\s*\{\s*"integerValue"\s*:\s*"[^"]+"\s*\}/g, '"tabswitched":{"integerValue":"0"}');
+            scrubbed = scrubbed.replace(/"copyPasted"\s*:\s*\{\s*"integerValue"\s*:\s*"[^"]+"\s*\}/g, '"copyPasted":{"integerValue":"0"}');
+            scrubbed = scrubbed.replace(/"offScreen"\s*:\s*\{\s*"integerValue"\s*:\s*"[^"]+"\s*\}/g, '"offScreen":{"integerValue":"0"}');
+            scrubbed = scrubbed.replace(/"hasExternalMonitor"\s*:\s*\{\s*"integerValue"\s*:\s*"[^"]+"\s*\}/g, '"hasExternalMonitor":{"integerValue":"0"}');
+            // URL-encoded patterns used in Firestore write stream channels and submit payloads
+            scrubbed = scrubbed.replace(/%22tabswitched%22%3A%7B%22integerValue%22%3A%22\d+%22%7D/g, '%22tabswitched%22%3A%7B%22integerValue%22%3A%220%22%7D');
+            scrubbed = scrubbed.replace(/%22copyPasted%22%3A%7B%22integerValue%22%3A%22\d+%22%7D/g, '%22copyPasted%22%3A%7B%22integerValue%22%3A%220%22%7D');
+            scrubbed = scrubbed.replace(/%22offScreen%22%3A%7B%22integerValue%22%3A%22\d+%22%7D/g, '%22offScreen%22%3A%7B%22integerValue%22%3A%220%22%7D');
+            scrubbed = scrubbed.replace(/%22hasExternalMonitor%22%3A%7B%22integerValue%22%3A%22\d+%22%7D/g, '%22hasExternalMonitor%22%3A%7B%22integerValue%22%3A%220%22%7D');
+            scrubbed = scrubbed.replace(/%22tabswitched%22%3A\d+/g, '%22tabswitched%22%3A0');
+            scrubbed = scrubbed.replace(/%22copyPasted%22%3A\d+/g, '%22copyPasted%22%3A0');
+            scrubbed = scrubbed.replace(/%22offScreen%22%3A\d+/g, '%22offScreen%22%3A0');
+            return scrubbed;
+        } catch (e) {
+            return body;
+        }
+    }
+
+    // 2. Hook window.fetch to serve mock manifest, files, speed-test & auto-validate integrity
     try {
         const origFetch = window.fetch;
         window.fetch = async function(...args) {
             const rawUrl = args[0];
+            const init = args[1];
             const url = typeof rawUrl === 'string' ? rawUrl : (rawUrl && rawUrl.url ? rawUrl.url : '');
 
-            if (url) {
-                // Return valid integrity check response for extensionvalidator
-                if (url.includes('extensionvalidator') || url.includes('pdf-validator')) {
-                    return new Response(JSON.stringify({ validation: true }), {
-                        status: 200,
-                        statusText: 'OK',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                }
+            try {
+                if (url) {
+                    let bypassActive = true;
+                    try {
+                        const bm = window.localStorage.getItem('neo_browser_bypass_mode');
+                        if (bm === 'off') bypassActive = false;
+                    } catch(e) {}
 
-                // Return valid SEB config validation for FacePrep
-                if (url.includes('validateSEBConfigKey') || url.includes('/api/validateSEBConfigKey')) {
-                    return new Response(JSON.stringify({ valid: true }), {
-                        status: 200,
-                        statusText: 'OK',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                }
+                    // Bypass-only intercepts
+                    if (bypassActive) {
+                        // speed-test.examly.io instant 200 OK
+                        if (url.includes('speed-test.examly.io')) {
+                            const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                            return new Response(JSON.stringify({ success: true, ip: targetIp }), {
+                                status: 200,
+                                statusText: 'OK',
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+                        }
 
-                // Return official manifest for extension manifest queries
-                if (url.includes(NEO_EXTENSION_ID) && url.includes('manifest.json')) {
-                    return new Response(JSON.stringify(NEO_MOCK_MANIFEST), {
-                        status: 200,
-                        statusText: 'OK',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
+                        // Localhost port 9999 /info and /status
+                        const isLocalPort = url.includes(':9999') || url.includes('127.0.0.1') || url.includes('localhost') || url.includes('[::1]');
+                        if (isLocalPort && url.includes('/info')) {
+                            return new Response("OK", {
+                                status: 200,
+                                statusText: 'OK',
+                                headers: { 'Content-Type': 'text/plain' }
+                            });
+                        }
+                        if (isLocalPort && url.includes('/status')) {
+                            const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                            const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                            const hash = isMac 
+                                ? "c3ca0fa8e426a37046e6c1804ab6870f6187ed5c7ca986bf0f01a7fe0a4825f3"
+                                : (isLinux 
+                                    ? "1465e4220443af218a923bd5bf80af6349ccef2cabdc4964484b5e6350a58c79"
+                                    : "d79e14a743710b354c614575930131ad52e3649d42e6a442e09a881ba2052e62");
+                            const payload = btoa(JSON.stringify({
+                                status: true,
+                                hash: hash,
+                                remote_desktop: false,
+                                active_processes: [],
+                                dual_screen: false
+                            }));
+                            return new Response(payload, {
+                                status: 200,
+                                statusText: 'OK',
+                                headers: { 'Content-Type': 'text/plain' }
+                            });
+                        }
+                    }
+
+                    // Ensure client_data is always valid in test verification requests (fetch)
+                    if (init && typeof init.body === 'string' && (url.includes('checkTestAllreadyTake') || url.includes('checktestSessionsSame') || url.includes('mM5YsmcTM6Msoj5r') || url.includes('CheckTestisHideOrNot'))) {
+                        try {
+                            const parsed = JSON.parse(init.body);
+                            if (!parsed.client_data || typeof parsed.client_data !== 'object' || Object.keys(parsed.client_data).length === 0) {
+                                const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                                const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                                const targetPlatform = isLinux ? 'Linux' : (isMac ? 'MacOS' : 'Windows');
+                                const targetOSVersion = isLinux ? "6.5.0" : (isMac ? "15.0.0" : "10.0.0");
+                                const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                                
+                                let curMode = 'off';
+                                try { curMode = localStorage.getItem('neo_browser_bypass_mode') || 'off'; } catch(e) {}
+                                if (curMode !== 'off') {
+                                    const curBName = curMode === 'neobrowser' ? 'Neo Browser' : 'Chrome';
+                                    const curBMajor = curMode === 'neobrowser' ? '2' : '128';
+                                    const curBVer = curMode === 'neobrowser' ? '2.0.10' : '128.0.0.0';
+                                    parsed.client_data = parsed.client_data || {};
+                                    parsed.client_data.browser = { name: curBName, major: curBMajor, version: curBVer };
+                                    parsed.client_data.OS = { name: targetPlatform, version: targetOSVersion };
+                                    parsed.client_data.Public_IP = targetIp;
+                                }
+                                init.body = JSON.stringify(parsed);
+                            }
+                        } catch(e) {}
+                    }
+
+                    // Return valid integrity check response for extensionvalidator
+                    if (url.includes('extensionvalidator') || url.includes('pdf-validator')) {
+                        return new Response(JSON.stringify({ validation: true }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Return valid SEB config validation for FacePrep
+                    if (url.includes('validateSEBConfigKey') || url.includes('/api/validateSEBConfigKey')) {
+                        return new Response(JSON.stringify({ valid: true }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Return official manifest for extension manifest queries
+                    if (url.includes(NEO_EXTENSION_ID) && url.includes('manifest.json')) {
+                        return new Response(JSON.stringify(NEO_MOCK_MANIFEST), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                    }
+
+                    // Clarity drop
+                    if (url.includes('.clarity.ms/')) {
+                        return new Response('', { status: 204, statusText: 'No Content' });
+                    }
+
+                    // Tab switch drop
+                    if (url.includes('/api/question/all/event')) {
+                        const bStr = typeof init?.body === 'string' ? init.body : '';
+                        if (bStr.includes('"tab-switch-done"') || bStr.includes('tab-switch-done')) {
+                            return new Response(JSON.stringify({ success: true, message: "OK" }), {
+                                status: 200,
+                                headers: { 'Content-Type': 'application/json' }
+                            });
+                        }
+                    }
+
+                    // Telemetry scrub
+                    if (init && typeof init.body === 'string' && (url.includes('examly.io') || url.includes('firestore.googleapis.com'))) {
+                        init.body = scrubViolationPayload(init.body);
+                    }
                 }
-            }
+            } catch(e) {}
 
             return origFetch.apply(this, args);
         };
     } catch (e) {}
 
-    // 3. Hook XMLHttpRequest as well for full compatibility
+    // 3. Hook XMLHttpRequest as well for full Angular HttpClient & portal compatibility
     try {
         const origOpen = XMLHttpRequest.prototype.open;
         const origSend = XMLHttpRequest.prototype.send;
 
         XMLHttpRequest.prototype.open = function(method, url, ...rest) {
-            this._neoUrl = typeof url === 'string' ? url : '';
+            this._neoUrl = typeof url === 'string' ? url : (url && url.toString ? url.toString() : '');
             return origOpen.call(this, method, url, ...rest);
         };
 
         XMLHttpRequest.prototype.send = function(body) {
-            if (this._neoUrl && (this._neoUrl.includes('extensionvalidator') || this._neoUrl.includes('pdf-validator'))) {
+            try {
+                const url = this._neoUrl || '';
+                let bypassActive = true;
                 try {
-                    Object.defineProperty(this, 'status', { value: 200, writable: true });
-                    Object.defineProperty(this, 'statusText', { value: 'OK', writable: true });
-                    Object.defineProperty(this, 'readyState', { value: 4, writable: true });
-                    Object.defineProperty(this, 'responseText', { value: JSON.stringify({ validation: true }), writable: true });
-                    Object.defineProperty(this, 'response', { value: JSON.stringify({ validation: true }), writable: true });
-                } catch(err) {}
-                setTimeout(() => {
-                    if (typeof this.onreadystatechange === 'function') this.onreadystatechange(new Event('readystatechange'));
-                    if (typeof this.onload === 'function') this.onload(new Event('load'));
-                }, 10);
-                return;
-            }
+                    const bm = window.localStorage.getItem('neo_browser_bypass_mode');
+                    if (bm === 'off') bypassActive = false;
+                } catch(e) {}
+
+                // Dispatch helper ensuring both property callbacks and event listeners fire
+                const dispatchSuccess = (xhr, respText) => {
+                    try {
+                        Object.defineProperty(xhr, 'status', { value: 200, writable: true, configurable: true });
+                        Object.defineProperty(xhr, 'statusText', { value: 'OK', writable: true, configurable: true });
+                        Object.defineProperty(xhr, 'readyState', { value: 4, writable: true, configurable: true });
+                        Object.defineProperty(xhr, 'responseText', { value: respText, writable: true, configurable: true });
+                        Object.defineProperty(xhr, 'response', { value: respText, writable: true, configurable: true });
+                    } catch(e) {}
+                    setTimeout(() => {
+                        try {
+                            if (typeof xhr.onreadystatechange === 'function') xhr.onreadystatechange(new Event('readystatechange'));
+                            xhr.dispatchEvent(new Event('readystatechange'));
+                            if (typeof xhr.onload === 'function') xhr.onload(new Event('load'));
+                            xhr.dispatchEvent(new Event('load'));
+                            if (typeof xhr.onloadend === 'function') xhr.onloadend(new Event('loadend'));
+                            xhr.dispatchEvent(new Event('loadend'));
+                        } catch(e) {}
+                    }, 5);
+                };
+
+                // Bypass-only intercepts
+                if (bypassActive && url) {
+                    if (url.includes('speed-test.examly.io')) {
+                        const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                        dispatchSuccess(this, JSON.stringify({ success: true, ip: targetIp }));
+                        return;
+                    }
+
+                    const isLocalPort = url.includes(':9999') || url.includes('127.0.0.1') || url.includes('localhost') || url.includes('[::1]');
+                    if (isLocalPort && url.includes('/info')) {
+                        dispatchSuccess(this, "OK");
+                        return;
+                    }
+                    if (isLocalPort && url.includes('/status')) {
+                        const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                        const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                        const hash = isMac 
+                            ? "c3ca0fa8e426a37046e6c1804ab6870f6187ed5c7ca986bf0f01a7fe0a4825f3"
+                            : (isLinux 
+                                ? "1465e4220443af218a923bd5bf80af6349ccef2cabdc4964484b5e6350a58c79"
+                                : "d79e14a743710b354c614575930131ad52e3649d42e6a442e09a881ba2052e62");
+                        const payload = btoa(JSON.stringify({
+                            status: true,
+                            hash: hash,
+                            remote_desktop: false,
+                            active_processes: [],
+                            dual_screen: false
+                        }));
+                        dispatchSuccess(this, payload);
+                        return;
+                    }
+                }
+
+                // Ensure client_data is always valid in test verification requests
+                if (typeof body === 'string' && (url.includes('checkTestAllreadyTake') || url.includes('checktestSessionsSame') || url.includes('mM5YsmcTM6Msoj5r') || url.includes('CheckTestisHideOrNot'))) {
+                    try {
+                        const parsed = JSON.parse(body);
+                        if (!parsed.client_data || typeof parsed.client_data !== 'object' || Object.keys(parsed.client_data).length === 0) {
+                            const isLinux = (navigator.platform || '').toLowerCase().includes('linux');
+                            const isMac = (navigator.platform || '').toLowerCase().includes('mac');
+                            const targetPlatform = isLinux ? 'Linux' : (isMac ? 'MacOS' : 'Windows');
+                            const targetOSVersion = isLinux ? "6.5.0" : (isMac ? "15.0.0" : "10.0.0");
+                            const targetIp = (typeof localStorage !== 'undefined' && localStorage.getItem('neo_cached_public_ip')) || "2409:408d:897:5bd8:cc77:4d8f:e555:11ae";
+                            
+                            let curMode = 'off';
+                            try { curMode = localStorage.getItem('neo_browser_bypass_mode') || 'off'; } catch(e) {}
+                            if (curMode !== 'off') {
+                                const curBName = curMode === 'neobrowser' ? 'Neo Browser' : 'Chrome';
+                                const curBMajor = curMode === 'neobrowser' ? '2' : '128';
+                                const curBVer = curMode === 'neobrowser' ? '2.0.10' : '128.0.0.0';
+                                parsed.client_data = parsed.client_data || {};
+                                parsed.client_data.browser = { name: curBName, major: curBMajor, version: curBVer };
+                                parsed.client_data.OS = { name: targetPlatform, version: targetOSVersion };
+                                parsed.client_data.Public_IP = targetIp;
+                            }
+                            body = JSON.stringify(parsed);
+                        }
+                    } catch(e) {}
+                }
+
+                // Extension & PDF validator integrity
+                if (url && (url.includes('extensionvalidator') || url.includes('pdf-validator'))) {
+                    dispatchSuccess(this, JSON.stringify({ validation: true }));
+                    return;
+                }
+
+                // Clarity tracking drop
+                if (url && url.includes('.clarity.ms/')) {
+                    try {
+                        Object.defineProperty(this, 'status', { value: 204, writable: true, configurable: true });
+                        Object.defineProperty(this, 'readyState', { value: 4, writable: true, configurable: true });
+                    } catch(e) {}
+                    setTimeout(() => {
+                        try {
+                            if (typeof this.onload === 'function') this.onload(new Event('load'));
+                            this.dispatchEvent(new Event('load'));
+                            if (typeof this.onloadend === 'function') this.onloadend(new Event('loadend'));
+                            this.dispatchEvent(new Event('loadend'));
+                        } catch(e) {}
+                    }, 5);
+                    return;
+                }
+
+                // Tab switch event drop
+                if (url && url.includes('/api/question/all/event') && typeof body === 'string' && body.includes('tab-switch-done')) {
+                    dispatchSuccess(this, '{"success":true}');
+                    return;
+                }
+
+                // Scrub proctoring violation payloads
+                if (typeof body === 'string' && (url.includes('examly.io') || url.includes('firestore.googleapis.com'))) {
+                    body = scrubViolationPayload(body);
+                }
+
+                // Cache real public IP if present in response
+                this.addEventListener('load', () => {
+                    try {
+                        if (this.responseText && this.responseText.includes('"ip"')) {
+                            const parsed = JSON.parse(this.responseText);
+                            if (parsed && parsed.ip && typeof localStorage !== 'undefined') {
+                                localStorage.setItem('neo_cached_public_ip', parsed.ip.toString().trim());
+                            }
+                        }
+                    } catch(e) {}
+                });
+            } catch(e) {}
+
             return origSend.call(this, body);
         };
     } catch (e) {}
@@ -523,5 +1307,156 @@
                 enumerable: true
             });
         }
+        // ==========================================
+        // PROCTORING & VISIBILITY HARDENING (MAIN WORLD)
+        // ==========================================
+        try {
+            // Lock visibilityState & hidden properties to prevent tab-switch / blur detections
+            const forceVisible = () => 'visible';
+            const forceNotHidden = () => false;
+
+            Object.defineProperty(Document.prototype, 'visibilityState', {
+                get: forceVisible,
+                configurable: true,
+                enumerable: true
+            });
+            Object.defineProperty(Document.prototype, 'webkitVisibilityState', {
+                get: forceVisible,
+                configurable: true,
+                enumerable: true
+            });
+            Object.defineProperty(Document.prototype, 'hidden', {
+                get: forceNotHidden,
+                configurable: true,
+                enumerable: true
+            });
+            Object.defineProperty(Document.prototype, 'webkitHidden', {
+                get: forceNotHidden,
+                configurable: true,
+                enumerable: true
+            });
+
+            // Prevent focus detection from reporting false
+            if (Document.prototype.hasFocus) {
+                Document.prototype.hasFocus = new Proxy(Document.prototype.hasFocus, {
+                    apply: () => true
+                });
+            }
+
+            // Suppress blur, visibilitychange, and pointer triggers on window and document
+            const blockedEventTypes = ['visibilitychange', 'webkitvisibilitychange', 'lostpointercapture'];
+            blockedEventTypes.forEach(evtName => {
+                window.addEventListener(evtName, (e) => {
+                    e.stopImmediatePropagation();
+                    e.stopPropagation();
+                }, true);
+                document.addEventListener(evtName, (e) => {
+                    e.stopImmediatePropagation();
+                    e.stopPropagation();
+                }, true);
+            });
+
+            // Suppress window blur events so student can switch windows or use HUD safely
+            window.addEventListener('blur', (e) => {
+                if (e.target === window || e.target === document) {
+                    e.stopImmediatePropagation();
+                    e.stopPropagation();
+                }
+            }, true);
+
+            // Suppress onblur, onvisibilitychange direct properties
+            ['onblur', 'onvisibilitychange'].forEach(prop => {
+                try {
+                    Object.defineProperty(window, prop, {
+                        get: () => null,
+                        set: () => {},
+                        configurable: true
+                    });
+                } catch(e) {}
+            });
+            try {
+                Object.defineProperty(document, 'onvisibilitychange', {
+                    get: () => null,
+                    set: () => {},
+                    configurable: true
+                });
+            } catch(e) {}
+
+            // Robust isTrusted spoofing on synthetic user interaction events
+            try {
+                const origIsTrustedDesc = Object.getOwnPropertyDescriptor(Event.prototype, 'isTrusted');
+                if (origIsTrustedDesc && origIsTrustedDesc.get) {
+                    const origGet = origIsTrustedDesc.get;
+                    Object.defineProperty(Event.prototype, 'isTrusted', {
+                        get: function() {
+                            try {
+                                if (!this) return true;
+                                if (this.__neoTrusted === true) return true;
+                                const target = this.target;
+                                if (target && target.nodeType === 1) {
+                                    if (target.closest && target.closest('[id*="option"], [aria-labelledby*="option"], [data-slot*="radio"], label, input, button, .ql-editor, .ace_editor, .cm-content, p, span, div')) {
+                                        return true;
+                                    }
+                                }
+                                return origGet.call(this);
+                            } catch (e) {
+                                return true;
+                            }
+                        },
+                        configurable: true,
+                        enumerable: true
+                    });
+                }
+            } catch (e) {}
+
+            // Neutralize anti-cheat siren / warning audio (race2.ogg / active-tab-audio)
+            try {
+                const origPlay = HTMLMediaElement.prototype.play;
+                HTMLMediaElement.prototype.play = function() {
+                    try {
+                        const src = (this.src || this.currentSrc || '').toLowerCase();
+                        if (src.includes('race2.ogg') || src.includes('audio/') || this.id === 'active-tab-audio') {
+                            this.muted = true;
+                            this.volume = 0;
+                            return Promise.resolve();
+                        }
+                    } catch(e) {}
+                    return origPlay.apply(this, arguments);
+                };
+            } catch (e) {}
+
+            // Clarity telemetry neutered stub
+            try {
+                const dummyClarity = function() {};
+                dummyClarity.q = [];
+                dummyClarity.v = '0.8.72-beta';
+                dummyClarity.t = true;
+                dummyClarity.start = function() {};
+                dummyClarity.stop = function() {};
+                dummyClarity.event = function() {};
+                dummyClarity.set = function() {};
+                dummyClarity.identify = function() {};
+                dummyClarity.metadata = function() {};
+                dummyClarity.upgrade = function() {};
+                window.clarity = dummyClarity;
+            } catch(e) {}
+
+            // Hook navigator.sendBeacon
+            if (navigator && navigator.sendBeacon) {
+                const origBeacon = navigator.sendBeacon;
+                navigator.sendBeacon = function(url, data) {
+                    try {
+                        const u = typeof url === 'string' ? url : '';
+                        if (u.includes('.clarity.ms/')) {
+                            return true;
+                        }
+                        if (typeof data === 'string' && (u.includes('examly.io') || u.includes('firestore.googleapis.com'))) {
+                            data = scrubViolationPayload(data);
+                        }
+                    } catch(e) {}
+                    return origBeacon.call(this, url, data);
+                };
+            }
+        } catch (e) {}
     } catch (e) {}
 })()

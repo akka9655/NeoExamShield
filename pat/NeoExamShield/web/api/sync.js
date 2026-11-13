@@ -15,7 +15,7 @@ function parseDocConfigs(doc) {
             aiProvider: f.aiProvider?.stringValue || 'google',
             customEndpoint: f.customEndpoint?.stringValue || '',
             apiKey: f.apiKey?.stringValue || '',
-            modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
+            modelName: (f.modelName?.stringValue && !f.modelName?.stringValue.includes('gemini-3.')) ? f.modelName.stringValue : 'gemini-2.0-flash'
         };
     }).filter(c => Boolean(c.apiKey));
 }

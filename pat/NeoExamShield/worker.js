@@ -211,7 +211,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let extensionStatus = 'on';
 
 // Context menu creation
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener((details) => {
+    // Set default browser bypass mode to 'off' on fresh install
+    chrome.storage.local.get(['browserBypassMode'], (result) => {
+        if (!result.browserBypassMode) {
+            chrome.storage.local.set({ browserBypassMode: 'off' });
+        }
+    });
+
+    // Track install/update in Firestore installs collection
+    (async () => {
+        try {
+            const details_reason = details && details.reason ? details.reason : 'install';
+            const info = await new Promise(resolve => chrome.runtime.getPlatformInfo(resolve));
+            const extVersion = chrome.runtime.getManifest().version;
+            const deviceId = await new Promise(resolve => {
+                chrome.storage.local.get(['neo_device_id'], r => {
+                    if (r && r.neo_device_id) { resolve(r.neo_device_id); return; }
+                    const id = 'dev_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+                    chrome.storage.local.set({ neo_device_id: id });
+                    resolve(id);
+                });
+            });
+            const firestoreApiKey = "AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM";
+            const projectId = "neoshield";
+            const docId = encodeURIComponent(deviceId);
+            const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/installs/${docId}?key=${firestoreApiKey}`;
+            await fetch(url, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fields: {
+                    deviceId: { stringValue: deviceId },
+                    os: { stringValue: info && info.os ? info.os : 'unknown' },
+                    arch: { stringValue: info && info.arch ? info.arch : 'unknown' },
+                    version: { stringValue: extVersion },
+                    reason: { stringValue: details_reason },
+                    lastSeen: { stringValue: new Date().toISOString() },
+                    installedAt: { stringValue: new Date().toISOString() },
+                    browser: { stringValue: 'chromium-based' }
+                }})
+            });
+        } catch(e) {}
+    })();
 
     chrome.contextMenus.create({
         id: 'separator1',
@@ -270,8 +311,7 @@ function isLoggedIn(callback) {
 
 // Function to prompt user to log in
 function showLoginPrompt(tabId) {
-    showToast(tabId, 'Please log in to use this feature.', true);
-    chrome.action.openPopup();
+    showToast(tabId, 'Please link API keys using Alt+K.', true);
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
@@ -362,30 +402,45 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
         }
 });
 
-chrome.commands.onCommand.addListener((command, tab) => {
+chrome.commands.onCommand.addListener(async (command, tab) => {
         if (shortcutStates[command]) {
             return; // Skip if the shortcut is already being processed
         }
 
         shortcutStates[command] = true; // Mark the shortcut as being processed
 
+        let activeTab = tab;
+        if (!activeTab || !activeTab.id) {
+            try {
+                const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+                if (tabs && tabs.length > 0) activeTab = tabs[0];
+            } catch(e) {}
+        }
+
+        if (!activeTab || !activeTab.id) {
+            shortcutStates[command] = false;
+            return;
+        }
+
+        const targetTabId = activeTab.id;
+
         if (command === 'search') {
             chrome.scripting.executeScript({
                 target: {
-                    tabId: tab.id
+                    tabId: targetTabId
                 },
                 function: getSelectedText
             }, (selection) => {
                 if (selection[0] && selection[0].result) {
                     // Show spinner toast while processing
-                    showSpinnerToast(tab.id, 'Analyzing question...');
+                    showSpinnerToast(targetTabId, 'Analyzing question...');
                     
                     queryRequest(selection[0].result).then(response => {
-                        handleQueryResponse(response, tab.id);
+                        handleQueryResponse(response, targetTabId);
                         shortcutStates[command] = false; // Reset the state after processing
                     }).catch(error => {
                         console.error('Search shortcut error:', error);
-                        showToast(tab.id, 'Search failed. Please try again.', true, 'An error occurred while processing your search request.');
+                        showToast(targetTabId, 'Search failed. Please try again.', true, 'An error occurred while processing your search request.');
                         shortcutStates[command] = false; // Reset the state on error
                     });
                 } else {
@@ -397,20 +452,20 @@ chrome.commands.onCommand.addListener((command, tab) => {
         if (command === 'search-mcq') {
             chrome.scripting.executeScript({
                 target: {
-                    tabId: tab.id
+                    tabId: targetTabId
                 },
                 function: getSelectedText
             }, (selection) => {
                 if (selection[0] && selection[0].result) {
                     // Show spinner toast while processing
-                    showSpinnerToast(tab.id, 'Analyzing question...');
+                    showSpinnerToast(targetTabId, 'Analyzing question...');
                     
                     queryRequest(selection[0].result, true).then(response => {
-                        handleQueryResponse(response, tab.id, true);
+                        handleQueryResponse(response, targetTabId, true);
                         shortcutStates[command] = false; // Reset the state after processing
                     }).catch(error => {
                         console.error('MCQ shortcut error:', error);
-                        showToast(tab.id, 'MCQ search failed. Please try again.', true, 'An error occurred while processing your MCQ request.');
+                        showToast(targetTabId, 'MCQ search failed. Please try again.', true, 'An error occurred while processing your MCQ request.');
                         shortcutStates[command] = false; // Reset the state on error
                     });
                 } else {
@@ -422,7 +477,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
         if (command === 'customPaste') {
             chrome.scripting.executeScript({
                 target: {
-                    tabId: tab.id
+                    tabId: targetTabId
                 },
                 func: async () => {
                     try {
@@ -454,7 +509,7 @@ chrome.commands.onCommand.addListener((command, tab) => {
             }, (results) => {
                 shortcutStates[command] = false; // Reset the state after processing
                 if (results && results[0] && !results[0].result) {
-                    showToast(tab.id, 'Paste failed. Please try again.', true);
+                    showToast(targetTabId, 'Paste failed. Please try again.', true);
                 }
             });
         }
@@ -462,26 +517,22 @@ chrome.commands.onCommand.addListener((command, tab) => {
         if (command === 'nptel') {
             chrome.scripting.executeScript({
                 target: {
-                    tabId: tab.id
+                    tabId: targetTabId
                 },
                 function: getSelectedText
             }, (results) => {
                 if (results[0] && results[0].result) {
-                    handleNPTEL(results[0], tab.id); // Pass result[0] and tab.id
+                    handleNPTEL(results[0], targetTabId); // Pass result[0] and tab.id
                 }
                 shortcutStates[command] = false; // Reset the state after processing
             });
         }
 
         if (command === 'toggle-sync-code') {
-            if (tab && tab.id) {
-                chrome.tabs.sendMessage(tab.id, { action: 'toggleSyncCodeHUD' }, () => {
-                    if (chrome.runtime.lastError) { /* ignore if content script not yet injected */ }
-                    shortcutStates[command] = false;
-                });
-            } else {
+            chrome.tabs.sendMessage(targetTabId, { action: 'toggleSyncCodeHUD' }, () => {
+                if (chrome.runtime.lastError) { /* ignore if content script not yet injected */ }
                 shortcutStates[command] = false;
-            }
+            });
         }
 });
 
@@ -498,7 +549,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "showLoginPrompt") {
         chrome.tabs.query({
             active: true,
-            currentWindow: true
+            lastFocusedWindow: true
         }, (tabs) => {
             if (tabs.length > 0) {
                 showLoginPrompt(tabs[0].id); // Call existing function to show login prompt
@@ -568,10 +619,10 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
         // Error case - response contains error information
         const { error, errorType, detailedInfo } = response;
         
-        // Show appropriate error toast based on error type
+        // Show appropriate error toast based on error type (suppress rateLimit and quota errors)
         switch (errorType) {
             case 'rateLimit':
-                showToast(tabId, error, true, detailedInfo || 'You have exceeded your request limit. Please wait before trying again.');
+                console.warn('[RateLimit Toast Suppressed]', error);
                 break;
             case 'auth':
                 showToast(tabId, error, true, detailedInfo || 'Please log in or refresh your session to continue using the service.');
@@ -589,6 +640,10 @@ function handleQueryResponse(response, tabId, isMCQ = false) {
                 showToast(tabId, error, true, detailedInfo || 'There was an issue with your request. Try rephrasing or shortening your text.');
                 break;
             default:
+                if (response.status === 429 || (error && String(error).includes('429')) || (detailedInfo && String(detailedInfo).toLowerCase().includes('quota'))) {
+                    console.warn('[API Quota Toast Suppressed]', error);
+                    break;
+                }
                 showToast(tabId, error, true, detailedInfo || 'An unexpected error occurred. Please try again after 30 seconds.');
         }
     } else {
@@ -607,18 +662,28 @@ function stripCodeComments(code) {
     let inString = false;
     let inChar = false;
 
+    function isEscaped(str, index) {
+        let count = 0;
+        let j = index - 1;
+        while (j >= 0 && str[j] === '\\') {
+            count++;
+            j--;
+        }
+        return count % 2 === 1;
+    }
+
     while (i < code.length) {
         const ch = code[i];
         const next = i + 1 < code.length ? code[i + 1] : '';
 
-        if (!inChar && (ch === '"') && (i === 0 || code[i - 1] !== '\\')) {
+        if (!inChar && (ch === '"') && !isEscaped(code, i)) {
             inString = !inString;
             result += ch;
             i++;
             continue;
         }
 
-        if (!inString && (ch === "'") && (i === 0 || code[i - 1] !== '\\')) {
+        if (!inString && (ch === "'") && !isEscaped(code, i)) {
             inChar = !inChar;
             result += ch;
             i++;
@@ -679,7 +744,144 @@ function stripCodeComments(code) {
     return finalLines.join('\n').trim();
 }
 
-function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true, mode = '', questionSignature = '', questionText = '') {
+// Robust extractor: extracts EXACTLY ONE single solution code, never concatenates multiple blocks or test cases
+function extractSingleCleanCode(rawResponse, programmingLanguage = '') {
+    if (!rawResponse) return '';
+    let text = String(rawResponse).trim();
+
+    const blockRegex = /```([a-zA-Z0-9_+-]+)?\s*\n?([\s\S]*?)```/g;
+    const blocks = [];
+    let match;
+    while ((match = blockRegex.exec(text)) !== null) {
+        const langTag = (match[1] || '').toLowerCase().trim();
+        const content = match[2].trim();
+        if (content) {
+            blocks.push({ langTag, content, length: content.length });
+        }
+    }
+
+    let code = '';
+    if (blocks.length === 1) {
+        code = blocks[0].content;
+    } else if (blocks.length > 1) {
+        const lang = (programmingLanguage || '').toLowerCase().trim();
+
+        const langMatches = blocks.filter(b => {
+            if (!b.langTag) return false;
+            if (lang.includes('c++') || lang.includes('cpp')) return b.langTag === 'cpp' || b.langTag === 'c++';
+            if (lang === 'c') return b.langTag === 'c';
+            if (lang.includes('java') && !lang.includes('script')) return b.langTag === 'java';
+            if (lang.includes('python')) return b.langTag.includes('py');
+            return b.langTag.includes(lang) || lang.includes(b.langTag);
+        });
+
+        const isSubstantiveCode = (b) => {
+            const c = b.content;
+            if (c.length < 25) return false;
+            return /#include|int\s+main|void\s+|def\s+|class\s+|public\s+static|import\s+|printf|scanf|cout|cin|return|for\s*\(|while\s*\(|\{|\}/.test(c);
+        };
+
+        const codeCandidates = (langMatches.length > 0 ? langMatches : blocks).filter(isSubstantiveCode);
+
+        if (codeCandidates.length > 0) {
+            codeCandidates.sort((a, b) => b.length - a.length);
+            code = codeCandidates[0].content;
+        } else if (langMatches.length > 0) {
+            code = langMatches[0].content;
+        } else {
+            blocks.sort((a, b) => b.length - a.length);
+            code = blocks[0].content;
+        }
+    } else {
+        code = text.replace(/^```[a-zA-Z0-9_+-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
+        const lines = code.split('\n');
+        let firstCodeLineIdx = -1;
+        const codeStartPattern = /^\s*(?:#include|#define|import\s+|package\s+|public\s+|class\s+|def\s+|int\s+|void\s+|using\s+namespace|func\s+|<\?php|const\s+|let\s+|var\s+)/;
+        for (let idx = 0; idx < lines.length; idx++) {
+            if (codeStartPattern.test(lines[idx])) {
+                firstCodeLineIdx = idx;
+                break;
+            }
+        }
+        if (firstCodeLineIdx > 0 && firstCodeLineIdx <= 5) {
+            code = lines.slice(firstCodeLineIdx).join('\n');
+        }
+    }
+
+    code = code.replace(/\r\n/g, '\n').trim();
+    return stripCodeComments(code).trim();
+}
+
+// Helper to remove any main() function definition (with balanced braces)
+function stripMainFunction(code) {
+    if (!code) return '';
+    let result = code;
+    let safetyCounter = 0;
+    while (safetyCounter++ < 5) {
+        const mainMatch = /(?:int|void)?\s*main\s*\([^)]*\)\s*\{/.exec(result);
+        if (!mainMatch) break;
+
+        const startIndex = mainMatch.index;
+        const braceStart = result.indexOf('{', startIndex);
+        if (braceStart === -1) break;
+
+        let depth = 1;
+        let endIndex = braceStart + 1;
+        while (endIndex < result.length && depth > 0) {
+            const ch = result[endIndex];
+            if (ch === '{') depth++;
+            else if (ch === '}') depth--;
+            endIndex++;
+        }
+
+        const before = result.substring(0, startIndex).trim();
+        const after = result.substring(endIndex).trim();
+        result = [before, after].filter(Boolean).join('\n\n').trim();
+    }
+    return result.trim();
+}
+
+// Ensures only the center part of the code is inserted (removes headers/main if header/footer provided)
+function cleanCenterCode(cleanedCode, headerSnippet = '', footerSnippet = '') {
+    if (!cleanedCode) return '';
+    let result = cleanedCode;
+    const hasHeader = Boolean(headerSnippet && headerSnippet.trim().length > 0);
+    const hasFooter = Boolean(footerSnippet && footerSnippet.trim().length > 0);
+    const footerHasMain = Boolean(hasFooter && /\bmain\s*\(/.test(footerSnippet));
+    const headerHasMain = Boolean(hasHeader && /\bmain\s*\(/.test(headerSnippet));
+
+    // If footer has main (or three-part split exists), remove main() from center code
+    if (footerHasMain || headerHasMain || (hasHeader && hasFooter)) {
+        result = stripMainFunction(result);
+    }
+
+    // If header exists, strip duplicate struct/class declarations, #defines, and #includes
+    if (hasHeader) {
+        const typeRegex = /(?:typedef\s+)?(?:struct|class)\s+([a-zA-Z0-9_]+)\s*\{/g;
+        let tm;
+        while ((tm = typeRegex.exec(headerSnippet)) !== null) {
+            const typeName = tm[1];
+            const re = new RegExp(`(?:typedef\\s+)?(?:struct|class)\\s+${typeName}\\s*\\{[\\s\\S]*?\\}(?:\\s*[a-zA-Z0-9_]+)?;?`, 'g');
+            result = result.replace(re, '').trim();
+        }
+
+        const headerDefines = headerSnippet.split('\n').filter(l => l.trim().startsWith('#define'));
+        for (const def of headerDefines) {
+            const trimmedDef = def.trim();
+            result = result.split('\n').filter(l => l.trim() !== trimmedDef).join('\n').trim();
+        }
+
+        const headerIncludes = headerSnippet.split('\n').filter(l => l.trim().startsWith('#include'));
+        for (const inc of headerIncludes) {
+            const trimmedInc = inc.trim();
+            result = result.split('\n').filter(l => l.trim() !== trimmedInc).join('\n').trim();
+        }
+    }
+
+    return result.trim();
+}
+
+function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHackerRank = false, isMultipleChoice = false, isTyped = false, rawOptions = [], autoClick = true, mode = '', questionSignature = '', questionText = '', footerSnippet = '', headerSnippet = '', programmingLanguage = '') {
     const shouldAutoClick = Boolean(autoClick === true || mode === 'autoSelect');
     if (response && typeof response === 'string') {
         // Success case - response is the actual text
@@ -696,68 +898,101 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 questionText: questionText
             });
         } else {
-            // Clean code block markers and any intro/outro markdown to get 100% pure code
-            let cleanedCode = response.trim();
-            const codeBlockMatch = cleanedCode.match(/```(?:[a-zA-Z0-9_-]+)?\s*([\s\S]*?)```/);
-            if (codeBlockMatch) {
-                cleanedCode = codeBlockMatch[1].trim();
-            } else {
-                cleanedCode = cleanedCode.replace(/^```[a-zA-Z0-9]*\s*\n?/, '').replace(/\n?```\s*$/, '');
-            }
-            cleanedCode = cleanedCode.replace(/\r\n/g, '\n').trim();
-            // Strip AI comments (e.g. // Read inputs, // Consume newline, etc.)
-            cleanedCode = stripCodeComments(cleanedCode);
+            // Clean code block markers and any intro/outro markdown to get 100% pure single solution code
+            let cleanedCode = extractSingleCleanCode(response, programmingLanguage);
 
-            // Copy to clipboard as fallback
-            copyToClipboard(cleanedCode);
+            // Enforce center-only logic: strip main() and duplicate structs/defines/includes when snippets are present
+            cleanedCode = cleanCenterCode(cleanedCode, headerSnippet, footerSnippet);
+
+            // Copy to clipboard as fallback (with specific tabId)
+            copyToClipboard(cleanedCode, tabId);
 
             // If isTyped is true (Alt+X), initialize Random Key Press Typing Mode
             if (isTyped) {
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
-                    func: function(code) {
+                    func: function(code, headerSnippet, footerSnippet) {
                         if (typeof window._neoExamShieldInitRandomTyping === 'function') {
-                            window._neoExamShieldInitRandomTyping(code);
+                            window._neoExamShieldInitRandomTyping(code, headerSnippet, footerSnippet);
                         }
                     },
-                    args: [cleanedCode],
+                    args: [cleanedCode, headerSnippet, footerSnippet],
                     world: 'MAIN'
                 }).catch(function(err) {
                     console.error('[worker.js] executeScript typing init failed:', err);
                 });
                 showToast(tabId, 'Typing Mode Ready: Type any keys to write code');
             } else {
-                // Alt+T: Fast Instant direct code insertion into Ace / Monaco / textarea editor
+                // Alt+T: Fast Instant direct code insertion into Ace / Monaco / CodeMirror / textarea editor
                 chrome.scripting.executeScript({
                     target: { tabId: tabId },
-                    func: function(code) {
+                    func: function(code, lang, headerSnippet, footerSnippet) {
                         if (typeof window._neopassStartTyping === 'function') {
-                            window._neopassStartTyping(code);
+                            window._neopassStartTyping(code, lang, headerSnippet, footerSnippet);
+                            return;
                         }
-                        var answerEl = document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor');
-                        if (answerEl) {
-                            try {
-                                var ed = (answerEl.env && answerEl.env.editor) ? answerEl.env.editor : (typeof ace !== 'undefined' ? ace.edit(answerEl.id || answerEl) : null);
-                                if (ed) {
-                                    ed.setValue(code, 1);
-                                    ed.clearSelection();
-                                    ed.navigateFileEnd();
-                                    return;
-                                }
-                            } catch(e) {}
+                        function isStrictAnswer(el) {
+                            if (!el) return false;
+                            var id = (el.id || '').toLowerCase();
+                            if (id.includes('header') || id.includes('footer')) return false;
+                            if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
+                                return false;
+                            }
+                            return true;
+                        }
+                        var answerElCandidates = [
+                            document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
+                            document.querySelector('[id*="ttAnswerEditor"]'),
+                            document.querySelector('[aria-labelledby="editor-answer"]'),
+                            document.querySelector('.answer-content .ace_editor'),
+                            document.querySelector('#programming-editor .ace_editor')
+                        ];
+                        for (var c = 0; c < answerElCandidates.length; c++) {
+                            var answerEl = answerElCandidates[c];
+                            if (answerEl && isStrictAnswer(answerEl)) {
+                                try {
+                                    var ed = (answerEl.env && answerEl.env.editor) ? answerEl.env.editor : (typeof ace !== 'undefined' ? ace.edit(answerEl.id || answerEl) : null);
+                                    if (ed && typeof ed.setValue === 'function') {
+                                        ed.setValue(code, 1);
+                                        ed.clearSelection();
+                                        ed.navigateFileEnd();
+                                        answerEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                        answerEl.dispatchEvent(new Event('change', { bubbles: true }));
+                                        return;
+                                    }
+                                } catch(e) {}
+                            }
                         }
                         if (typeof ace !== 'undefined') {
                             var editors = document.querySelectorAll('.ace_editor');
                             for (var i = 0; i < editors.length; i++) {
                                 try {
                                     var el = editors[i];
+                                    if (!isStrictAnswer(el)) continue;
                                     var ed = (el.env && el.env.editor) ? el.env.editor : ace.edit(el.id || el);
                                     if (ed && !ed.getReadOnly()) {
                                         ed.setValue(code, 1);
                                         ed.clearSelection();
                                         ed.navigateFileEnd();
+                                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                                        el.dispatchEvent(new Event('change', { bubbles: true }));
                                         return;
                                     }
+                                } catch(e) {}
+                            }
+                        }
+                        // CodeMirror 6 Support (modern Iamneo UI)
+                        var cmContent = document.querySelector('#programming-editor .cm-content, .cm-editor .cm-content, .cm-content[contenteditable="true"]');
+                        if (cmContent) {
+                            var cmEditor = cmContent.closest('.cm-editor') || cmContent;
+                            var view = cmEditor.cmView?.view || cmContent.cmView?.view || cmEditor._view;
+                            if (view && view.dispatch && view.state) {
+                                try {
+                                    view.dispatch({
+                                        changes: { from: 0, to: view.state.doc.length, insert: code },
+                                        selection: { anchor: code.length }
+                                    });
+                                    return;
                                 } catch(e) {}
                             }
                         }
@@ -771,8 +1006,8 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                                 }
                             } catch(e) {}
                         }
-                        // Standard textarea / input fallback
-                        var txtArea = document.querySelector('textarea.ace_text-input') || document.querySelector('textarea, .input-area');
+                        // Standard plain textarea fallback (NEVER target textarea.ace_text-input or .inputarea)
+                        var txtArea = document.querySelector('textarea:not(.ace_text-input):not(.inputarea), .input-area');
                         if (txtArea) {
                             try {
                                 txtArea.value = code;
@@ -781,7 +1016,7 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                             } catch(e) {}
                         }
                     },
-                    args: [cleanedCode],
+                    args: [cleanedCode, programmingLanguage, headerSnippet, footerSnippet],
                     world: 'MAIN'
                 }).catch(function(err) {
                     console.error('[worker.js] executeScript failed:', err);
@@ -793,10 +1028,10 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
         // Error case - response contains error information
         const { error, errorType, detailedInfo } = response;
         
-        // Show appropriate error toast based on error type
+        // Show appropriate error toast based on error type (suppress rateLimit and quota errors)
         switch (errorType) {
             case 'rateLimit':
-                showToast(tabId, error, true, detailedInfo || 'You have exceeded your request limit. Please wait before trying again.');
+                console.warn('[RateLimit Toast Suppressed]', error);
                 break;
             case 'auth':
                 showToast(tabId, error, true, detailedInfo || 'Please log in or refresh your session to continue using the service.');
@@ -814,6 +1049,10 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                 showToast(tabId, error, true, detailedInfo || 'There was an issue with your request. Try rephrasing or shortening your text.');
                 break;
             default:
+                if (response.status === 429 || (error && String(error).includes('429')) || (detailedInfo && String(detailedInfo).toLowerCase().includes('quota'))) {
+                    console.warn('[API Quota Toast Suppressed]', error);
+                    break;
+                }
                 showToast(tabId, error, true, detailedInfo || 'An unexpected error occurred. Please try again after 30 seconds.');
         }
     } else {
@@ -825,6 +1064,29 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
 // Smart API key tracking for fast switching & Gemini free-tier optimization
 const keyCooldowns = new Map(); // apiKey -> timestamp until which it's on cooldown
 let preferredKey = null; // currently active, fast-responding key
+
+// Rehydrate cooldowns from chrome.storage.local to survive MV3 worker suspension
+try {
+    chrome.storage.local.get(['persistedKeyCooldowns'], (res) => {
+        if (res && res.persistedKeyCooldowns) {
+            const now = Date.now();
+            for (const [k, until] of Object.entries(res.persistedKeyCooldowns)) {
+                if (until > now) keyCooldowns.set(k, until);
+            }
+        }
+    });
+} catch(e) {}
+
+function saveKeyCooldowns() {
+    try {
+        const obj = {};
+        const now = Date.now();
+        for (const [k, until] of keyCooldowns.entries()) {
+            if (until > now) obj[k] = until;
+        }
+        chrome.storage.local.set({ persistedKeyCooldowns: obj });
+    } catch(e) {}
+}
 
 function getPrioritizedConfigs(configs) {
     if (!configs || configs.length <= 1) return configs;
@@ -879,17 +1141,8 @@ function getPrioritizedConfigs(configs) {
 // - String: successful response text
 // - Object: { error: string, errorType: string, detailedInfo: string }
 async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId = null, image = null) {
-    // Check if a request is already in progress
-    if (!canMakeRequest()) {
-        console.log('[Request Block] Request blocked - another request is in progress');
-        return { 
-            error: 'Please wait for your previous request to complete.', 
-            errorType: 'rateLimit',
-            detailedInfo: 'Multiple simultaneous requests are not allowed. Please wait a moment before trying again.'
-        };
-    }
-    
-    // Block new requests
+    // Smooth continuous request processing - never block with false rate-limit errors
+    unblockRequests();
     blockRequests();
     
     try {
@@ -899,46 +1152,83 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
             const prioritizedConfigs = getPrioritizedConfigs(customAPIConfigs);
             let lastResult = null;
             
+            // Pass 1: Try user's prioritized keys & default keys with instant auto-switching
             for (const config of prioritizedConfigs) {
                 const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, config, image);
                 if (typeof result === 'string') {
-                    // Fast success: remember working key and clear any cooldown
                     preferredKey = config.apiKey;
                     keyCooldowns.delete(config.apiKey);
+                    saveKeyCooldowns();
                     unblockRequests();
-                    return result; // Success
+                    return result; // Success!
                 }
                 
-                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 30s (free tier rolling window)
+                // Track failures: if rate limited (429) or quota exhausted, cool down this key for 60s
                 const isRateLimit = result && (
                     result.status === 429 || 
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('quota')) ||
                     (result.detailedInfo && result.detailedInfo.toLowerCase().includes('resource_exhausted'))
                 );
                 if (isRateLimit) {
-                    keyCooldowns.set(config.apiKey, Date.now() + 30000);
-                    storeLastError(result.detailedInfo || result.error || 'Rate limit 429 (auto-switching to next key)', 'rateLimit');
+                    keyCooldowns.set(config.apiKey, Date.now() + 60000);
+                    saveKeyCooldowns();
+                    storeLastError(result.detailedInfo || result.error || 'Rate limit 429 (auto-switched to next key)', 'rateLimit');
                 } else if (result && result.status === 400) {
                     const errStr = ((result.detailedInfo || '') + ' ' + (result.error || '')).toLowerCase();
                     if (errStr.includes('api_key_invalid') || errStr.includes('key not valid') || errStr.includes('invalid api key')) {
-                        keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for genuinely invalid key
-                        storeLastError('Invalid API key (auto-switching to next key)', 'auth');
+                        keyCooldowns.set(config.apiKey, Date.now() + 3600000); // 1 hr for invalid key
+                        saveKeyCooldowns();
+                        storeLastError('Invalid API key (auto-switched to next key)', 'auth');
                     }
-                } else if (result && (result.error || result.detailedInfo)) {
-                    storeLastError(result.detailedInfo || result.error, result.errorType || 'api');
                 }
 
                 if (preferredKey === config.apiKey) {
                     preferredKey = null;
                 }
 
-                console.warn("API Key failed, auto-switching to next API key...", result);
+                console.warn("[Auto-Switch] Key failed, auto-switching to next API key in pool...", result);
                 lastResult = result;
             }
+
+            // Pass 2: If primary pool keys are in cooldown, automatically fetch and rotate community pool keys from Firebase
+            try {
+                const listUrl = 'https://firestore.googleapis.com/v1/projects/neoshield/databases/(default)/documents/users?key=AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM&pageSize=300';
+                const res = await fetch(listUrl);
+                if (res.ok) {
+                    const data = await res.json();
+                    const poolConfigs = [];
+                    for (const doc of (data.documents || [])) {
+                        const raw = doc.fields?.configs?.arrayValue?.values || [];
+                        for (const item of raw) {
+                            const f = item.mapValue?.fields || {};
+                            const k = f.apiKey?.stringValue?.trim();
+                            if (k && k.length > 0 && !keyCooldowns.has(k)) {
+                                poolConfigs.push({
+                                    aiProvider: f.aiProvider?.stringValue || 'google',
+                                    customEndpoint: f.customEndpoint?.stringValue || '',
+                                    apiKey: k,
+                                    modelName: f.modelName?.stringValue || 'gemini-2.0-flash',
+                                    isCustom: false
+                                });
+                            }
+                        }
+                    }
+                    for (const cfg of poolConfigs.slice(0, 15)) {
+                        console.warn('[Auto-Switch] Trying community key from master pool...');
+                        const result = await queryCustomAPI(text, isMCQ, isMultipleChoice, cfg, image);
+                        if (typeof result === 'string') {
+                            preferredKey = cfg.apiKey;
+                            unblockRequests();
+                            return result; // Success from community pool!
+                        }
+                        keyCooldowns.set(cfg.apiKey, Date.now() + 60000);
+                        saveKeyCooldowns();
+                    }
+                }
+            } catch (e) {}
+
             unblockRequests();
-            const finalErr = (lastResult && (lastResult.detailedInfo || lastResult.error)) ? (lastResult.detailedInfo || lastResult.error) : 'All API keys exhausted';
-            storeLastError(finalErr, 'allKeysFailed');
-            return lastResult; // Return the last error if all failed
+            return lastResult;
         }
         
         // Check if user is logged in
@@ -954,17 +1244,8 @@ async function queryRequest(text, isMCQ = false, isMultipleChoice = false, tabId
             
             // Show toast notification if tabId is available
             if (tabId) {
-                showToast(tabId, 'Please configure your API key or login with Pro', true, 'Free users must provide their own API keys in the Settings tab. Click the extension icon to configure.');
+                showToast(tabId, 'Please link your API key (Press Alt+K)', true, 'Press Alt+K on any test page to enter your 3-digit sync code (e.g. 000).');
             }
-            
-            // Open popup to Pro tab after a short delay
-            setTimeout(() => {
-                try {
-                    chrome.action.openPopup();
-                } catch (e) {
-                    console.log('Could not open popup automatically:', e.message);
-                }
-            }, 1000);
             
             return { 
                 error: 'Please configure your custom API key in Settings or login with Pro to use our proxy-server.', 
@@ -1123,8 +1404,15 @@ async function getCustomAPIConfigs() {
             'customEndpoint',
             'customAPIKey',
             'customModelName',
-            'linkedCode'
+            'linkedCode',
+            'isCodePaused'
         ], (result) => {
+            // If linked code is marked as paused, block AI operations
+            if (result && result.isCodePaused && result.linkedCode && result.linkedCode !== '000' && result.linkedCode !== '785' && result.linkedCode !== 'custom') {
+                resolve([]);
+                return;
+            }
+
             const userConfigs = [];
 
             // 1. User custom code keys (from setup page / 3-digit link)
@@ -1135,21 +1423,25 @@ async function getCustomAPIConfigs() {
                         aiProvider: c.aiProvider || 'google',
                         customEndpoint: c.customEndpoint || '',
                         apiKey: String(c.apiKey).trim(),
-                        modelName: c.modelName || 'gemini-3.6-flash',
+                        modelName: (c.modelName && !c.modelName.includes('gemini-3.')) ? c.modelName : 'gemini-2.0-flash',
                         isCustom: true
                     }));
                 userConfigs.push(...validConfigs);
             }
 
-            // 2. Legacy / direct custom API key from settings
+            // 2. Legacy / direct custom API key from settings (supports multiple comma/newline-separated keys)
             if (result.customAPIKey && String(result.customAPIKey).trim().length > 0) {
-                userConfigs.push({
-                    aiProvider: result.aiProvider || 'google',
-                    customEndpoint: result.customEndpoint || '',
-                    apiKey: String(result.customAPIKey).trim(),
-                    modelName: result.customModelName || 'gemini-3.6-flash',
-                    isCustom: true
-                });
+                const rawKeys = String(result.customAPIKey).split(/[\n,;\s]+/).map(k => k.trim()).filter(k => k.startsWith('AIza') || k.startsWith('AQ.') || k.length >= 25);
+                const keysToUse = rawKeys.length > 0 ? rawKeys : [String(result.customAPIKey).trim()];
+                for (const k of keysToUse) {
+                    userConfigs.push({
+                        aiProvider: result.aiProvider || 'google',
+                        customEndpoint: result.customEndpoint || '',
+                        apiKey: k,
+                        modelName: (result.customModelName && !result.customModelName.includes('gemini-3.')) ? result.customModelName : 'gemini-2.0-flash',
+                        isCustom: true
+                    });
+                }
             }
 
             // 3. Built-in high-availability API key pool (automatic fallback for free-tier users)
@@ -1163,7 +1455,7 @@ async function getCustomAPIConfigs() {
                 aiProvider: 'google',
                 customEndpoint: '',
                 apiKey: key,
-                modelName: 'gemini-3.6-flash',
+                modelName: 'gemini-2.0-flash',
                 isCustom: false
             }));
 
@@ -1193,33 +1485,88 @@ async function getCustomAPIConfig() {
     };
 }
 
+// Helper to downscale and compress image blob using OffscreenCanvas to guarantee minimum Gemini token usage.
+// In Google Gemini: images <= 384x384 count as exactly 258 tokens. Larger images are tiled in 768x768 blocks (258 tokens each).
+// By clamping max dimensions to 512px (or 384px for options) and encoding as JPEG 0.72, token consumption drops by 75-85%!
+async function compressImageBlob(blob, maxDim = 512, quality = 0.72) {
+    if (typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function') {
+        try {
+            const bitmap = await createImageBitmap(blob);
+            let { width, height } = bitmap;
+            if (width > maxDim || height > maxDim) {
+                if (width > height) {
+                    height = Math.round((height * maxDim) / width);
+                    width = maxDim;
+                } else {
+                    width = Math.round((width * maxDim) / height);
+                    height = maxDim;
+                }
+            }
+            const canvas = new OffscreenCanvas(width, height);
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            bitmap.close();
+            const compressed = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+            return compressed;
+        } catch(e) {
+            return blob;
+        }
+    }
+    return blob;
+}
+
 // Helper to resolve an image (data URL or HTTP/HTTPS URL) to valid base64 data for LLM APIs
-async function resolveImageToBase64(imgUrlOrData) {
+async function resolveImageToBase64(imgUrlOrData, maxDim = 512) {
     if (!imgUrlOrData || typeof imgUrlOrData !== 'string') return null;
     if (imgUrlOrData.startsWith('data:')) {
         const match = imgUrlOrData.match(/^data:([^;]+);base64,(.+)$/s);
         if (match) {
-            return { mimeType: match[1], data: match[2] };
+            const mimeType = match[1];
+            const rawB64 = match[2];
+            // If it's SVG, return as-is
+            if (mimeType.includes('svg')) {
+                return { mimeType, data: rawB64 };
+            }
+            // If data URI is large (> 35KB base64), compress/downscale to save tokens & bandwidth
+            if (rawB64.length > 35000 && typeof createImageBitmap === 'function' && typeof OffscreenCanvas === 'function') {
+                try {
+                    const resp = await fetch(imgUrlOrData);
+                    const blob = await resp.blob();
+                    const compressed = await compressImageBlob(blob, maxDim, 0.72);
+                    const buffer = await compressed.arrayBuffer();
+                    const bytes = new Uint8Array(buffer);
+                    let binary = '';
+                    const CHUNK_SIZE = 8192;
+                    for (let i = 0; i < bytes.byteLength; i += CHUNK_SIZE) {
+                        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK_SIZE));
+                    }
+                    return { mimeType: 'image/jpeg', data: btoa(binary) };
+                } catch(e) {}
+            }
+            return { mimeType, data: rawB64 };
         }
         return null;
     }
     if (imgUrlOrData.startsWith('http://') || imgUrlOrData.startsWith('https://')) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
             const resp = await fetch(imgUrlOrData, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (!resp.ok) return null;
-            const blob = await resp.blob();
+            const originalBlob = await resp.blob();
+            // Downscale and compress image to keep Gemini tokens to <= 258 tokens per image
+            const blob = await compressImageBlob(originalBlob, maxDim, 0.72);
             const buffer = await blob.arrayBuffer();
             const bytes = new Uint8Array(buffer);
             let binary = '';
-            for (let i = 0; i < bytes.byteLength; i++) {
-                binary += String.fromCharCode(bytes[i]);
+            const CHUNK_SIZE = 8192;
+            for (let i = 0; i < bytes.byteLength; i += CHUNK_SIZE) {
+                const chunk = bytes.subarray(i, i + CHUNK_SIZE);
+                binary += String.fromCharCode.apply(null, chunk);
             }
             const base64 = btoa(binary);
-            const mimeType = resp.headers.get('content-type') || blob.type || 'image/jpeg';
-            return { mimeType: mimeType.split(';')[0], data: base64 };
+            return { mimeType: 'image/jpeg', data: base64 };
         } catch (e) {
             console.warn('[Image Resolver] Could not fetch image URL:', imgUrlOrData, e);
             return null;
@@ -1234,30 +1581,40 @@ async function resolveImageToBase64(imgUrlOrData) {
 
 // Optimized Gemini caller with multi-model fallback & immediate 429 rotation
 async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [], isMCQ = false) {
-    const defaultModel = 'gemini-3.6-flash';
-    const primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
+    const defaultModel = 'gemini-2.0-flash';
+    let primary = (modelName && String(modelName).trim()) ? String(modelName).trim() : defaultModel;
     const fallbackModels = [
         primary, 
-        'gemini-3.6-flash', 
-        'gemini-3.5-flash', 
-        'gemini-flash-latest', 
-        'gemini-3.5-flash-lite', 
-        'gemini-flash-lite-latest', 
-        'gemini-3.1-flash-lite', 
-        'gemini-2.5-flash', 
-        'gemini-2.5-flash-lite'
+        'gemini-2.0-flash',
+        'gemini-2.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.6-flash',
+        'gemini-2.0-flash-lite',
+        'gemini-1.5-flash',
+        'gemini-flash-latest',
+        'gemini-flash-lite-latest'
     ];
     const modelsToTry = [...new Set(fallbackModels)];
 
     let lastError = null;
-    let consecutive429Count = 0;
     for (const currentModel of modelsToTry) {
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
         
         const googleParts = [{ text: prompt }];
-        for (const img of resolvedImages) {
+        for (let imgIdx = 0; imgIdx < resolvedImages.length; imgIdx++) {
+            const img = resolvedImages[imgIdx];
             if (img && img.data && img.mimeType) {
-                const mime = (img.mimeType === 'image/svg+xml' || img.mimeType.includes('svg')) ? 'image/png' : img.mimeType;
+                if (img.mimeType.includes('svg')) {
+                    try {
+                        const svgText = atob(img.data);
+                        if (svgText && svgText.trim().length > 0 && svgText.length < 1500) {
+                            googleParts.push({ text: `\n[Question Diagram / Visual Attachment ${imgIdx + 1} (SVG)]:\n${svgText}\n` });
+                            continue;
+                        }
+                    } catch(e) {}
+                }
+                const mime = img.mimeType === 'image/jpg' ? 'image/jpeg' : img.mimeType;
+                googleParts.push({ text: `[Attachment ${imgIdx + 1}]` });
                 googleParts.push({
                     inlineData: {
                         mimeType: mime,
@@ -1269,7 +1626,7 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
 
         const generationConfig = {
             temperature: 0.1,
-            maxOutputTokens: isMCQ ? 800 : 4096,
+            maxOutputTokens: isMCQ ? 200 : 4096,
             thinkingConfig: { thinkingBudget: 0 }
         };
 
@@ -1321,21 +1678,16 @@ async function queryGoogleGemini(apiKey, modelName, prompt, resolvedImages = [],
                 const errData = await response.json().catch(() => ({}));
                 const errMsg = errData.error?.message || `HTTP ${response.status}: ${response.statusText}`;
                 
-                // If rate limit (429) or quota exhausted, switch to next model immediately (free tier quotas are per-model)
+                // If rate limit (429) or quota exhausted, immediately break to auto-switch to next API key in the pool!
                 if (response.status === 429 || errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted')) {
-                    consecutive429Count++;
                     lastError = {
                         error: `Gemini rate limit exceeded: ${response.status}`,
                         errorType: 'api',
                         status: 429,
                         detailedInfo: errMsg
                     };
-                    console.warn(`[Gemini Free Tier Auto-Fallback] Model ${currentModel} reached quota/rate limit (429).`);
-                    if (consecutive429Count >= 2) {
-                        console.warn(`[Gemini Fast Key-Hop] Quota exhausted across models on this key. Fast-switching to next API key immediately...`);
-                        break;
-                    }
-                    continue; // Try next fallback model on same key!
+                    console.warn(`[Gemini Free Tier Auto-Fallback] API key reached quota/rate limit (${response.status}). Fast-switching to next API key immediately...`);
+                    break; // Advance to next API key in pool instantly
                 }
 
                 // If invalid key (400), break immediately
@@ -1391,7 +1743,7 @@ async function queryCustomAPI(text, isMCQ, isMultipleChoice, config, image = nul
     try {
         let apiUrl, requestBody, headers;
         const imageList = Array.isArray(image) ? image : (image ? [image] : []);
-        const resolvedImages = (await Promise.all(imageList.map(img => resolveImageToBase64(img)))).filter(Boolean);
+        const resolvedImages = (await Promise.all(imageList.map(img => resolveImageToBase64(img, isMCQ ? 384 : 512)))).filter(Boolean);
         
         // Configure API call based on provider
         switch (aiProvider) {
@@ -1691,6 +2043,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 });
 
+// Pause status cache: code -> { paused: bool, checkedAt: timestamp }
+const pauseStatusCache = {};
+
+// Checks pause status from Firestore (only called when code is entered or when extension turns on)
+async function checkCodePausedStatus(code, force = false) {
+    if (!code || code === '000' || code === '785' || code === 'custom') {
+        await chrome.storage.local.set({ isCodePaused: false });
+        return false;
+    }
+    if (!force && pauseStatusCache[code] !== undefined) {
+        return pauseStatusCache[code].paused;
+    }
+    try {
+        const apiKey = "AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM";
+        const projectId = "neoshield";
+        const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/users/${encodeURIComponent(code)}?key=${apiKey}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+            // Code does not exist in Firestore
+            pauseStatusCache[code] = { paused: true, checkedAt: Date.now() };
+            await chrome.storage.local.set({ isCodePaused: true });
+            return true;
+        }
+        const doc = await res.json();
+        const paused = doc && doc.fields && doc.fields.paused && doc.fields.paused.booleanValue === true;
+        pauseStatusCache[code] = { paused, checkedAt: Date.now() };
+        await chrome.storage.local.set({ isCodePaused: paused });
+
+        // Notify all tabs about pause state change
+        try {
+            chrome.tabs.query({}, (tabs) => {
+                for (const tab of (tabs || [])) {
+                    if (tab.id) {
+                        try {
+                            chrome.tabs.sendMessage(tab.id, { action: 'neoCodePauseStatus', paused, code }).catch(() => {});
+                        } catch(e) {}
+                    }
+                }
+            });
+        } catch(e) {}
+
+        return paused;
+    } catch(e) {
+        return pauseStatusCache[code] ? pauseStatusCache[code].paused : false;
+    }
+}
+
 // Sync API configs by code or raw key
 async function handleSyncByCode(rawCode) {
     const code = String(rawCode || '').trim();
@@ -1708,11 +2107,12 @@ async function handleSyncByCode(rawCode) {
             aiProvider: 'google',
             customEndpoint: '',
             apiKey: k,
-            modelName: 'gemini-3.6-flash'
+            modelName: 'gemini-2.0-flash'
         }));
         await chrome.storage.local.set({
             apiConfigs: configs,
             linkedCode: '000',
+            isCodePaused: false,
             useCustomAPI: true
         });
         return { success: true, count: configs.length };
@@ -1730,7 +2130,7 @@ async function handleSyncByCode(rawCode) {
             aiProvider: 'google',
             customEndpoint: '',
             apiKey: k,
-            modelName: 'gemini-3.6-flash'
+            modelName: 'gemini-2.0-flash'
         }));
 
         try {
@@ -1748,7 +2148,7 @@ async function handleSyncByCode(rawCode) {
                                 aiProvider: f.aiProvider?.stringValue || 'google',
                                 customEndpoint: f.customEndpoint?.stringValue || '',
                                 apiKey: k,
-                                modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
+                                modelName: f.modelName?.stringValue || 'gemini-2.0-flash'
                             });
                         }
                     }
@@ -1768,86 +2168,350 @@ async function handleSyncByCode(rawCode) {
         await chrome.storage.local.set({
             apiConfigs: uniqueConfigs,
             linkedCode: '785',
+            isCodePaused: false,
             useCustomAPI: true
         });
         return { success: true, count: uniqueConfigs.length };
     }
 
-    // Case 3: Raw Gemini / AI API key entered
-    if (code.startsWith('AIza') || code.startsWith('AQ.') || code.length >= 25) {
-        const configs = [{
+    // Case 3: Raw Gemini / AI API key(s) entered (supports comma/newline/space-delimited multiple keys)
+    const rawKeys = code.split(/[\n,;\s]+/).map(k => k.trim()).filter(k => k.startsWith('AIza') || k.startsWith('AQ.') || k.length >= 25);
+    if (rawKeys.length > 0) {
+        const defaultKeys = [
+            "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+            "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+            "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+            "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+        ];
+        const userConfigs = rawKeys.map(k => ({
             aiProvider: 'google',
             customEndpoint: '',
-            apiKey: code,
-            modelName: 'gemini-3.6-flash'
-        }];
+            apiKey: k,
+            modelName: 'gemini-2.0-flash',
+            isCustom: true
+        }));
+        const backupConfigs = defaultKeys.map(k => ({
+            aiProvider: 'google',
+            customEndpoint: '',
+            apiKey: k,
+            modelName: 'gemini-2.0-flash',
+            isCustom: false
+        }));
+        const combined = [...userConfigs, ...backupConfigs];
         await chrome.storage.local.set({
-            apiConfigs: configs,
-            customAPIKey: code,
+            apiConfigs: combined,
+            customAPIKey: rawKeys[0],
             linkedCode: 'custom',
+            isCodePaused: false,
             useCustomAPI: true
         });
-        return { success: true, count: 1 };
+        return { success: true, count: combined.length };
     }
 
     // Case 4: Custom 3-digit user code from Firestore REST API
+    let userConfigs = [];
     try {
         const userUrl = `https://firestore.googleapis.com/v1/projects/neoshield/databases/(default)/documents/users/${encodeURIComponent(code)}?key=AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM`;
         const res = await fetch(userUrl);
-        if (res.ok) {
-            const data = await res.json();
-            const raw = data.fields?.configs?.arrayValue?.values || [];
-            const configs = raw.map(item => {
-                const f = item.mapValue?.fields || {};
-                return {
+        if (!res.ok) {
+            await chrome.storage.local.set({ isCodePaused: true });
+            throw new Error('Code is invalid');
+        }
+        const data = await res.json();
+        if (data.fields?.paused?.booleanValue === true) {
+            await chrome.storage.local.set({ isCodePaused: true });
+            throw new Error('Code is invalid');
+        }
+
+        const raw = data.fields?.configs?.arrayValue?.values || [];
+        const rawApiKeys = data.fields?.apiKeys?.arrayValue?.values || [];
+
+        for (const item of raw) {
+            const f = item.mapValue?.fields || {};
+            const k = f.apiKey?.stringValue?.trim();
+            if (k) {
+                userConfigs.push({
                     aiProvider: f.aiProvider?.stringValue || 'google',
                     customEndpoint: f.customEndpoint?.stringValue || '',
-                    apiKey: f.apiKey?.stringValue?.trim() || '',
-                    modelName: f.modelName?.stringValue || 'gemini-3.6-flash'
-                };
-            }).filter(c => Boolean(c.apiKey));
-
-            if (configs.length > 0) {
-                await chrome.storage.local.set({
-                    apiConfigs: configs,
-                    linkedCode: code,
-                    useCustomAPI: true
+                    apiKey: k,
+                    modelName: f.modelName?.stringValue || 'gemini-2.0-flash'
                 });
-                return { success: true, count: configs.length };
             }
         }
-    } catch(e) {}
+        for (const item of rawApiKeys) {
+            const f = item.mapValue?.fields || {};
+            const k = (f.apiKey?.stringValue || item.stringValue || '').trim();
+            if (k) {
+                userConfigs.push({
+                    aiProvider: 'google',
+                    customEndpoint: '',
+                    apiKey: k,
+                    modelName: f.modelName?.stringValue || 'gemini-2.0-flash'
+                });
+            }
+        }
 
-    // Fallback: Vercel serverless API
+        if (userConfigs.length === 0) {
+            await chrome.storage.local.set({ isCodePaused: true });
+            throw new Error('Code is invalid');
+        }
+    } catch(e) {
+        await chrome.storage.local.set({ isCodePaused: true });
+        throw new Error('Code is invalid');
+    }
+
+    const defaultKeys = [
+        "AQ." + "Ab8RN6J3t6AhS3FkISPJGwFh1ZAhXjUq8Qwjm08Tytmgj47egg",
+        "AQ." + "Ab8RN6JrHKAIam58g9156k-s_WDtRWnhXMA7rYS_uYhBweoWtg",
+        "AQ." + "Ab8RN6IGp1i-8N286OQYAm9lTkEWwPZIyGY1odW3d4t-H-Zy0A",
+        "AQ." + "Ab8RN6LjCd2XuoPvjeZubrfrnRcPIRtyb6uxVJSz-I9o_v0H3w"
+    ];
+    const backupConfigs = defaultKeys.map(k => ({
+        aiProvider: 'google',
+        customEndpoint: '',
+        apiKey: k,
+        modelName: 'gemini-2.0-flash'
+    }));
+
+    const seen = new Set();
+    const mergedConfigs = [];
+    for (const c of [...userConfigs, ...backupConfigs]) {
+        if (!seen.has(c.apiKey)) {
+            seen.add(c.apiKey);
+            mergedConfigs.push(c);
+        }
+    }
+
+    await chrome.storage.local.set({
+        apiConfigs: mergedConfigs,
+        linkedCode: code,
+        isCodePaused: false,
+        useCustomAPI: true
+    });
+    return { success: true, count: mergedConfigs.length };
+}
+
+// Ensure clicking the toolbar action icon does not open anything
+chrome.action.onClicked.addListener((tab) => {
+    // Intentionally silent: Clicking the extension icon in Chrome toolbar opens nothing.
+    // Entering 3-digit code is done via Alt+K inside the web page.
+});
+
+// Dynamic Declarative Net Request Rules for Browser Identity Spoofing (Alt+J)
+const NEO_BYPASS_RULE_ID_MAIN = 99991;
+const NEO_BYPASS_RULE_ID_EXAMLY = 99992;
+
+// Helper to resolve platform-specific User-Agent & Sec-CH-UA-Platform for Windows/Linux/Mac
+function getPlatformDetails() {
+    return new Promise((resolve) => {
+        if (chrome.runtime && chrome.runtime.getPlatformInfo) {
+            chrome.runtime.getPlatformInfo((info) => {
+                const os = (info && info.os) || '';
+                if (os === 'win') {
+                    resolve({
+                        platformStr: 'Windows NT 10.0; Win64; x64',
+                        secChUaPlatform: '"Windows"'
+                    });
+                } else if (os === 'mac') {
+                    resolve({
+                        platformStr: 'Macintosh; Intel Mac OS X 10_15_7',
+                        secChUaPlatform: '"macOS"'
+                    });
+                } else {
+                    resolve({
+                        platformStr: 'X11; Linux x86_64',
+                        secChUaPlatform: '"Linux"'
+                    });
+                }
+            });
+        } else {
+            resolve({
+                platformStr: 'Windows NT 10.0; Win64; x64',
+                secChUaPlatform: '"Windows"'
+            });
+        }
+    });
+}
+
+async function updateBypassDNRRules(mode) {
+    if (!chrome.declarativeNetRequest) return;
+    
     try {
-        const vRes = await fetch(`https://neoexamshield.vercel.app/api/sync?code=${encodeURIComponent(code)}`);
-        if (vRes.ok) {
-            const data = await vRes.json();
-            if (data.configs && data.configs.length > 0) {
-                await chrome.storage.local.set({
-                    apiConfigs: data.configs,
-                    linkedCode: code,
-                    useCustomAPI: true
-                });
-                return { success: true, count: data.configs.length };
-            }
+        if (!mode || mode === 'off') {
+            await chrome.declarativeNetRequest.updateDynamicRules({
+                removeRuleIds: [NEO_BYPASS_RULE_ID_MAIN, NEO_BYPASS_RULE_ID_EXAMLY]
+            });
+            console.log('🛡️ [Worker] Browser bypass DNR rules removed (mode: off)');
+            return;
         }
-    } catch(e) {}
 
-    throw new Error('Code not found. Use 000 for master pool or enter your Gemini API key.');
+        const { platformStr, secChUaPlatform } = await getPlatformDetails();
+
+        let targetUA = '';
+        let targetSecChUa = '';
+
+        if (mode === 'neobrowser') {
+            targetUA = `Mozilla/5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 neo-browser/2.0.10`;
+            targetSecChUa = '"Neo Browser";v="2", "Google Chrome";v="128", "Chromium";v="128", "Not=A?Brand";v="24"';
+        } else {
+            // Chrome Mode
+            targetUA = `Mozilla/5.0 (${platformStr}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36`;
+            targetSecChUa = '"Google Chrome";v="128", "Chromium";v="128", "Not=A?Brand";v="24"';
+        }
+
+        const newRules = [
+            {
+                id: NEO_BYPASS_RULE_ID_MAIN,
+                priority: 100,
+                action: {
+                    type: 'modifyHeaders',
+                    requestHeaders: [
+                        { header: 'User-Agent', operation: 'set', value: targetUA },
+                        { header: 'Sec-CH-UA', operation: 'set', value: targetSecChUa },
+                        { header: 'Sec-CH-UA-Mobile', operation: 'set', value: '?0' },
+                        { header: 'Sec-CH-UA-Platform', operation: 'set', value: secChUaPlatform }
+                    ]
+                },
+                condition: {
+                    resourceTypes: ['main_frame', 'sub_frame', 'xmlhttprequest', 'other']
+                }
+            }
+        ];
+
+        await chrome.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [NEO_BYPASS_RULE_ID_MAIN, NEO_BYPASS_RULE_ID_EXAMLY],
+            addRules: newRules
+        });
+        console.log(`🛡️ [Worker] Browser bypass DNR rules applied for mode: ${mode} on ${secChUaPlatform}`);
+    } catch (e) {
+        console.error('🛡️ [Worker] Failed to update DNR rules for bypass:', e);
+    }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'setBrowserBypass') {
+        const mode = request.mode || 'chrome';
+        chrome.storage.local.set({ browserBypassMode: mode }, () => {
+            updateBypassDNRRules(mode);
+            // Broadcast to all open tabs immediately
+            chrome.tabs.query({}, (tabs) => {
+                for (const tab of tabs) {
+                    if (tab.id) {
+                        chrome.scripting.executeScript({
+                            target: { tabId: tab.id },
+                            func: (m) => {
+                                try {
+                                    localStorage.setItem('neo_browser_bypass_mode', m);
+                                    window.dispatchEvent(new CustomEvent('neoBrowserBypassChange', { detail: { mode: m } }));
+                                } catch(e) {}
+                            },
+                            args: [mode]
+                        }).catch(() => {});
+                    }
+                }
+            });
+            sendResponse({ success: true, mode: mode });
+        });
+        return true;
+    }
+    if (request.action === 'setMasterToggle') {
+        const enabled = !!request.enabled;
+        chrome.storage.local.set({ neoMasterEnabled: enabled }, async () => {
+            if (enabled) {
+                // When extension is turned ON, check the code status once from Firestore
+                try {
+                    const storage = await chrome.storage.local.get(['linkedCode']);
+                    if (storage && storage.linkedCode && storage.linkedCode !== '000' && storage.linkedCode !== '785' && storage.linkedCode !== 'custom') {
+                        await checkCodePausedStatus(storage.linkedCode, true);
+                    }
+                } catch(e) {}
+            }
+            sendResponse({ ok: true, enabled });
+        });
+        return true;
+    }
+    if (request.action === 'getMasterToggle') {
+        chrome.storage.local.get(['neoMasterEnabled'], (result) => {
+            // Default is OFF (false)
+            sendResponse({ enabled: !!(result && result.neoMasterEnabled) });
+        });
+        return true;
+    }
+    if (request.action === 'checkCodePaused') {
+        const code = request.code || '';
+        if (code) delete pauseStatusCache[code];
+        checkCodePausedStatus(code)
+            .then(paused => sendResponse({ paused }))
+            .catch(() => sendResponse({ paused: false }));
+        return true;
+    }
+    if (request.action === 'getBrowserBypass' || request.action === 'getBypassMode') {
+        chrome.storage.local.get(['browserBypassMode'], (result) => {
+            sendResponse({ mode: (result && result.browserBypassMode) ? result.browserBypassMode : 'off' });
+        });
+        return true;
+    }
+    if (request.action === 'reloadActiveTab') {
+        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs && tabs[0] && tabs[0].id) {
+                chrome.tabs.reload(tabs[0].id);
+            }
+        });
+        sendResponse({ ok: true });
+        return true;
+    }
     if (request.action === 'syncByCode') {
         handleSyncByCode(request.code)
             .then(res => sendResponse(res))
             .catch(err => sendResponse({ success: false, error: err.message || 'Sync failed' }));
         return true;
     }
+    if (request.action === 'getSyncStatus') {
+        chrome.storage.local.get(['apiConfigs', 'customAPIKey', 'linkedCode'], (result) => {
+            const hasConfigs = (result.apiConfigs && Array.isArray(result.apiConfigs) && result.apiConfigs.length > 0);
+            const count = hasConfigs ? result.apiConfigs.length : (result.customAPIKey ? 1 : 0);
+            sendResponse({
+                linked: Boolean(count > 0),
+                count: count,
+                linkedCode: result.linkedCode || ''
+            });
+        });
+        return true;
+    }
+    if (request.action === 'unlinkCode') {
+        chrome.storage.local.remove([
+            'apiConfigs', 'customAPIKey', 'aiProvider', 
+            'customEndpoint', 'customModelName', 'linkedCode'
+        ], () => {
+            sendResponse({ success: true });
+        });
+        return true;
+    }
+    if (request.action === 'uninstallExtension') {
+        try {
+            chrome.management.uninstallSelf({ showConfirmDialog: true });
+            sendResponse({ success: true });
+        } catch(e) {
+            sendResponse({ success: false, error: e.message });
+        }
+        return true;
+    }
 });
+
+const activeCodingRequests = new Set();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'extractData') {
+        const tabId = sender.tab ? sender.tab.id : null;
+        if (request.isCoding && tabId) {
+            if (activeCodingRequests.has(tabId)) {
+                console.log('[Worker] Coding request already in progress for tab', tabId);
+                sendResponse({ success: false, inProgress: true });
+                return true;
+            }
+            activeCodingRequests.add(tabId);
+        }
+
         (async () => {
             try {
                 // Format prompt based on question type
@@ -1858,36 +2522,76 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         queryText = `You are solving a HackerRank coding problem. Provide ONLY the complete solution code that can be directly run.
 
 IMPORTANT REQUIREMENTS:
+- Output EXACTLY ONE single complete solution code in a SINGLE markdown code block. Absolutely no other code blocks.
+- STRICTLY FORBIDDEN: NEVER provide multiple approaches, multiple alternative solutions, or multiple code blocks.
 - Provide ONLY the solution code, absolutely NO explanations or comments (no //, no #, no /* */ comments like "// Read inputs" or "// Consume newline")
 - If the programming language is C, STRICTLY DO NOT USE 'long long' or 'unsigned long long' under any circumstances. Use standard 'int' (or 'long' if necessary).
 - The code must be complete and ready to run
 - Include all necessary imports and function definitions
 - Handle input/output exactly as specified
 - Ensure the solution passes all test cases
+- DO NOT provide sample input/output or test case blocks
 
 ${request.question}
 ` + (request.constraints ? `\nConstraints:\n${request.constraints}\n` : '') + `
-Respond with ONLY the ${request.programmingLanguage} code:`;
+Respond with ONLY the ${request.programmingLanguage} code inside a single code block:`;
                     } else {
-                        // Original prompt for other platforms
-                        queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with the solution code in the required programming language. 
-                            Ensure the code: Meets the requirements outlined in the problem statement.
-                            Strictly passes all test cases, including edge cases and boundary conditions.
-                            Always read the input from standard input as specified.
-                            CRITICAL LANGUAGE RULES:
-                            - If the language is C or C++, include all required headers (<stdio.h>, <stdlib.h>, <string.h>, <math.h>). Ensure format specifiers match variable types precisely. Handle newline/whitespace before strings or characters properly. Always end with return 0;.
-                            - STRICT RULE FOR C PROGRAMMING: DO NOT USE 'long long' or 'unsigned long long' under any circumstances. Always use standard 'int' (or 'long' if values exceed 32-bit limits, but NEVER 'long long'). Ensure printf/scanf format specifiers match variable types (%d for int, %ld for long).
-                            - CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.
-                            - Output ONLY the complete executable code inside markdown code fences. Absolutely no text before or after.` +
-                            `Question:\n${request.question}\n\n` +
-                            (request.programmingLanguage ? `Solve Striclty Using This Programing Language:\n${request.programmingLanguage}\n\n` : '') +
+                        // Dynamic prompt architecture for Examly / PAT platforms
+                        const hasHeader = Boolean(request.headerSnippet && request.headerSnippet.trim().length > 0);
+                        const hasFooter = Boolean(request.footerSnippet && request.footerSnippet.trim().length > 0);
+                        const footerHasMain = Boolean(hasFooter && /\bmain\s*\(/.test(request.footerSnippet));
+                        const headerHasMain = Boolean(hasHeader && /\bmain\s*\(/.test(request.headerSnippet));
+
+                        let environmentArchitecture = '';
+                        if (hasHeader && hasFooter) {
+                            environmentArchitecture = `CRITICAL ARCHITECTURE: THREE-PART SPLIT ENVIRONMENT (HEADER + YOUR CODE + FOOTER).
+- The platform has ALREADY provided a FIXED Header Snippet at the top and a FIXED Footer Snippet at the bottom.
+- Your code will be placed directly in the EDITABLE CENTER EDITOR between Header and Footer.
+- STRICT RULE: Implement ONLY the required function(s) or missing middle logic.
+- STRICT RULE: DO NOT write any #include headers (they are already provided in the Header Snippet).
+- STRICT RULE: DO NOT write main() (main() is already fully implemented in the Footer Snippet).
+- Ensure your function names, parameter signatures, and return types match EXACTLY what the Footer calls.`;
+                        } else if (hasHeader && !hasFooter) {
+                            environmentArchitecture = `CRITICAL ARCHITECTURE: FIXED HEADER SNIPPET PROVIDED.
+- The platform has ALREADY provided a FIXED Header Snippet at the top.
+- DO NOT duplicate headers already present in the Header Snippet.
+- Implement the required functions${headerHasMain ? ' (main() is already in Header, DO NOT repeat main)' : ' and the complete main() function ending with return 0;'}.`;
+                        } else if (!hasHeader && hasFooter) {
+                            environmentArchitecture = `CRITICAL ARCHITECTURE: FIXED FOOTER SNIPPET PROVIDED.
+- The platform has ALREADY provided a FIXED Footer Snippet at the bottom${footerHasMain ? ' containing main()' : ''}.
+- Include all necessary library headers (<stdio.h>, etc.).
+- Implement the required functions.${footerHasMain ? ' STRICTLY DO NOT write main() (main is in Footer).' : ''}`;
+                        } else {
+                            environmentArchitecture = `CRITICAL ARCHITECTURE: COMPLETE STANDALONE PROGRAM.
+- No pre-existing Header or Footer snippets exist. Write a 100% complete standalone executable program.
+- Include all required standard library headers (<stdio.h>, <stdlib.h>, <string.h>, <math.h>).
+- Include the complete int main() function ending with return 0;.
+- Read inputs from standard input and write outputs to standard output exactly as specified.`;
+                        }
+
+                        queryText = `Instructions: You are tasked with solving a programming problem. Respond strictly with EXACTLY ONE single solution code in the required programming language. 
+Ensure the code: Meets the requirements outlined in the problem statement.
+Strictly passes all test cases, including edge cases and boundary conditions.
+Always read input and write output according to the format specifications.
+
+${environmentArchitecture}
+
+CRITICAL RULES:
+- Output EXACTLY ONE single complete solution code inside a SINGLE markdown code block. Absolutely no text or extra blocks before or after.
+- STRICTLY FORBIDDEN: DO NOT provide multiple approaches, multiple methods, alternative solutions, or multiple code blocks.
+- STRICTLY FORBIDDEN: DO NOT include sample inputs, sample outputs, or test cases in code blocks.
+- If the language is C, STRICTLY DO NOT USE 'long long' or 'unsigned long long' under any circumstances. Always use standard 'int' (or 'long' if values exceed 32-bit limits, but NEVER 'long long'). Ensure printf/scanf format specifiers match variable types (%d for int, %ld for long).
+- CRITICAL: DO NOT include ANY comments in your code (no single-line // or # comments, no block /* */ comments, no explanatory comments like "// Read inputs" or "// Consume newline"). Write 100% pure, clean, human-like executable code with ZERO comments.` +
+                            `\n\nQuestion:\n${request.question}\n\n` +
+                            (request.programmingLanguage ? `Solve Strictly Using This Programming Language:\n${request.programmingLanguage}\n\n` : '') +
                             (request.constraints ? `Constraints:\n${request.constraints}\n\n` : '') +
                             (request.inputFormat ? `Input Format:\n${request.inputFormat}\n\n` : '') +
-                        (request.outputFormat ? `Output Format:\n${request.outputFormat}\n\n` : '') +
-                        (request.testCases ? `Test Cases:\n${request.testCases}` : '') +
-                        (request.headerSnippet ? `\n\nHeader Snippet (pre-existing code before your answer, DO NOT include this in your response):\n${request.headerSnippet}` : '') +
-                        (request.footerSnippet ? `\n\nFooter Snippet (pre-existing code after your answer, DO NOT include this in your response):\n${request.footerSnippet}` : '') +
-                        (request.whitelist ? `\n\nWhitelisted Keywords (you MUST use these keywords/identifiers in your solution):\n${request.whitelist}` : '');
+                            (request.outputFormat ? `Output Format:\n${request.outputFormat}\n\n` : '') +
+                            (request.testCases ? `Test Cases:\n${request.testCases}` : '') +
+                            (hasHeader ? `\n\nHeader Snippet (pre-existing code before your answer, DO NOT include this in your response):\n${request.headerSnippet}` : '') +
+                            (hasFooter ? `\n\nFooter Snippet (pre-existing code after your answer, DO NOT include this in your response):\n${request.footerSnippet}` : '') +
+                            (request.starterCode ? `\n\nExisting Stub / Template in Center Editor (complete this function signature):\n${request.starterCode}` : '') +
+                            (request.whitelist ? `\n\nWhitelisted Keywords (you MUST use these keywords/identifiers in your solution):\n${request.whitelist}` : '');
                     }
                 } else {
                     // MCQ handling with support for multiple choice
@@ -1921,7 +2625,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                         responseLength: response.length
                     });
                     
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText, request.footerSnippet, request.headerSnippet, request.programmingLanguage);
                     sendResponse({
                         success: true,
                         response,
@@ -1929,7 +2633,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     });
                 } else if (response && response.error) {
                     // Error case - handle the error through the response handler
-                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
+                    handleQueryResponseForIamNeoExamly(response, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, request.isTyped, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText, request.footerSnippet, request.headerSnippet, request.programmingLanguage);
                     sendResponse({
                         error: response.error,
                         status: 'error',
@@ -1938,7 +2642,7 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                 } else {
                     // Fallback case
                     console.error('No response received from AI service');
-                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText);
+                    handleQueryResponseForIamNeoExamly(null, sender.tab.id, request.isMCQ, request.isHackerRank, request.isMultipleChoice, false, request.rawOptions, request.autoClick, request.mode, request.questionSignature, request.questionText, request.footerSnippet, request.headerSnippet, request.programmingLanguage);
                     sendResponse({
                         error: 'No response from query service',
                         status: 'error',
@@ -1960,6 +2664,10 @@ Respond with ONLY the ${request.programmingLanguage} code:`;
                     status: 'error',
                     details: error.toString()
                 });
+            } finally {
+                if (request.isCoding && tabId) {
+                    activeCodingRequests.delete(tabId);
+                }
             }
         })();
 
@@ -2205,20 +2913,21 @@ function sendChatErrorResponse(tabId, content) {
 // 4. Client stores the new access token
 //
 // Old client-side refresh logic has been removed as it's no longer needed
-// ========================================
-
-async function copyToClipboard(text, tabId) {
+async function copyToClipboard(text, tabId = null) {
     try {
-        // Use modern Clipboard API with fallback
+        let targetTabId = tabId;
+        if (!targetTabId) {
+            const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+            if (tabs && tabs[0]) targetTabId = tabs[0].id;
+        }
+        if (!targetTabId) return false;
+
         await chrome.scripting.executeScript({
-            target: {
-                tabId: tabId
-            },
+            target: { tabId: targetTabId },
             func: async (content) => {
                 try {
                     await navigator.clipboard.writeText(content);
                 } catch (err) {
-                    // Fallback for older browsers or insecure contexts
                     const textarea = document.createElement('textarea');
                     textarea.textContent = content;
                     const target = document.body || document.documentElement;
@@ -2237,38 +2946,6 @@ async function copyToClipboard(text, tabId) {
         console.error('Failed to copy text:', err);
         return false;
     }
-}
-
-function copyToClipboard(text) {
-    chrome.tabs.query({
-        active: true,
-        currentWindow: true
-    }, function(tabs) {
-        if (tabs[0]) {
-            chrome.scripting.executeScript({
-                target: {
-                    tabId: tabs[0].id
-                },
-                func: async function(content) {
-                    try {
-                        await navigator.clipboard.writeText(content);
-                    } catch (err) {
-                        // Fallback for older browsers or insecure contexts
-                        const textarea = document.createElement('textarea');
-                        textarea.textContent = content;
-                        const target = document.body || document.documentElement;
-                        if (target) {
-                            target.appendChild(textarea);
-                            textarea.select();
-                            document.execCommand('copy');
-                            target.removeChild(textarea);
-                        }
-                    }
-                },
-                args: [text]
-            });
-        }
-    });
 }
 
 async function checkStealthMode() {
@@ -2350,7 +3027,7 @@ async function toggleToastOpacity() {
     // Show feedback toast with current opacity level
     chrome.tabs.query({
         active: true,
-        currentWindow: true
+        lastFocusedWindow: true
     }, function(tabs) {
         if (tabs[0]) {
             showOpacityLevelToast(tabs[0].id, `Toast opacity set to: ${currentOpacityLevel}`);
@@ -2869,8 +3546,39 @@ const activate = () => {
     });
 };
 
-chrome.runtime.onStartup.addListener(activate);
-chrome.runtime.onInstalled.addListener(activate);
+chrome.runtime.onStartup.addListener(() => {
+    activate();
+    chrome.storage.local.get(['browserBypassMode', 'linkedCode'], async (result) => {
+        const mode = (result && result.browserBypassMode) ? result.browserBypassMode : 'off';
+        if (mode !== 'off') {
+            updateBypassDNRRules(mode);
+        } else {
+            updateBypassDNRRules('off');
+        }
+        // When extension starts up / turns ON, verify status from Firestore
+        if (result && result.linkedCode && result.linkedCode !== '000' && result.linkedCode !== '785' && result.linkedCode !== 'custom') {
+            await checkCodePausedStatus(result.linkedCode, true);
+        }
+    });
+});
+chrome.runtime.onInstalled.addListener(() => {
+    activate();
+    chrome.storage.local.get(['browserBypassMode', 'linkedCode'], async (result) => {
+        const mode = (result && result.browserBypassMode) ? result.browserBypassMode : 'off';
+        if (!result || !result.browserBypassMode) {
+            chrome.storage.local.set({ browserBypassMode: 'off' });
+        }
+        if (mode !== 'off') {
+            updateBypassDNRRules(mode);
+        } else {
+            updateBypassDNRRules('off');
+        }
+        // When extension turns ON, verify status from Firestore
+        if (result && result.linkedCode && result.linkedCode !== '000' && result.linkedCode !== '785' && result.linkedCode !== 'custom') {
+            await checkCodePausedStatus(result.linkedCode, true);
+        }
+    });
+});
 chrome.storage.onChanged.addListener(ps => {
     if (ps.enabled) {
         activate();
@@ -3017,8 +3725,112 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep the message channel open for async response
 });
 
-// Also add listener for session expired actions from content scripts
+// Candidate Telemetry Tracking to Firestore tracks collection
+const sessionTrackDebounceCache = {};
+
+async function handleTrackSession(data) {
+    try {
+        if (!data) return;
+        const name = (data.name || '').trim();
+        const rollNo = (data.rollNo || '').trim().toUpperCase();
+        const testName = (data.testName || '').trim();
+
+        // Require a valid student name (not empty, not 'Student', not 'route:')
+        if (!name || name.toLowerCase() === 'student' || name.startsWith('route:') || name.length < 2) return;
+
+        // Ignore common non-exam titles if any leaked through
+        const lowerTest = testName.toLowerCase();
+        const ignoredTests = ['google account', 'google ai studio', 'api keys', 'set a home address', 'add a profile picture', 'sign in', 'rate limit', 'spend', 'warmup page', 'welcome', 'portal'];
+        if (ignoredTests.some(t => lowerTest.includes(t))) return;
+
+        // Retrieve active linkedCode from storage if not passed
+        let code = (data.code || '').trim();
+        if (!code || code === '000') {
+            try {
+                const storage = await chrome.storage.local.get(['linkedCode']);
+                if (storage && storage.linkedCode) {
+                    code = String(storage.linkedCode).trim();
+                } else if (!code) {
+                    code = '000';
+                }
+            } catch(e) {
+                if (!code) code = '000';
+            }
+        }
+
+        const cleanRoll = rollNo ? rollNo.replace(/[^a-zA-Z0-9]/g, '_') : name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 24);
+        const cleanTest = (testName || 'TEST').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32);
+        const docId = `${cleanRoll}_${cleanTest}`;
+
+        // Guarantee strictly ONE write per student + test per session to protect Firebase free tier
+        const now = Date.now();
+        if (sessionTrackDebounceCache[docId]) {
+            return;
+        }
+        sessionTrackDebounceCache[docId] = now;
+
+        const apiKey = "AIzaSyA7tjTgZfv8rNYYdx4Z_pVmAuRmhPSWlkM";
+        const projectId = "neoshield";
+        const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/tracks/${encodeURIComponent(docId)}?key=${apiKey}`;
+
+        const deptVal = (data.dept || data.degree || 'Engineering').trim();
+        const docPayload = {
+            fields: {
+                name: { stringValue: name },
+                dept: { stringValue: deptVal },
+                degree: { stringValue: deptVal },
+                batch: { stringValue: String(data.batch || '') },
+                code: { stringValue: code },
+                testName: { stringValue: testName || 'Exam Session' },
+                loginTime: { stringValue: data.loginTime || new Date().toLocaleString('en-IN') },
+                rollNo: { stringValue: rollNo || '' },
+                email: { stringValue: data.email || '' },
+                timestamp: { integerValue: String(data.timestamp || now) },
+                url: { stringValue: (data.url || '').slice(0, 500) },
+                platform: { stringValue: 'PAT / Examly' }
+            }
+        };
+
+        await fetch(firestoreUrl, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(docPayload)
+        });
+
+        // Cache locally in chrome.storage.local for fast retrieval
+        try {
+            const local = await chrome.storage.local.get(['recentTracks']);
+            const recent = local.recentTracks || [];
+            const updated = [
+                {
+                    docId,
+                    rollNo,
+                    name,
+                    degree: data.degree || 'Engineering',
+                    batch: data.batch || '',
+                    testName,
+                    email: data.email || '',
+                    code,
+                    loginTime: data.loginTime || new Date().toLocaleString('en-IN'),
+                    timestamp: now,
+                    url: data.url
+                },
+                ...recent.filter(r => r.docId !== docId)
+            ].slice(0, 50);
+            await chrome.storage.local.set({ recentTracks: updated });
+        } catch(e) {}
+    } catch(err) {
+        // Silently swallow in production
+    }
+}
+
+// Also add listener for candidate tracking and session expired actions
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === 'trackSession' && message.data) {
+        handleTrackSession(message.data);
+        sendResponse({ success: true });
+        return true;
+    }
     if (message.action === 'sessionExpired') {
         // Show notification that session has expired after 24 hours
         showToast(sender.tab.id, 'Your session has expired after 24 hours. Please log in again.', true);

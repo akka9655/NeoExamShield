@@ -2871,14 +2871,35 @@ if (typeof window.isMac === 'undefined') {
                 toggleChatOverlay();
             }
 
-            // Alt+M (Option+M on macOS): If text is selected, show Quick Short Answer HUD
+            // Alt+M (Option+M on macOS): Turn ON / Show Quick Short Answer HUD
             const isKeyM = e.code === "KeyM" || (e.key && e.key.toLowerCase() === "m") || e.keyCode === 77 || e.key === "µ" || e.key === "Â";
             if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyM) {
                 const selectedText = getPageSelectedText();
-                if (selectedText && selectedText.length > 0) {
+                const isHudVisible = quickHudEl && quickHudEl.style.display !== "none";
+
+                if (isHudVisible && (!selectedText || selectedText === currentQuickText)) {
+                    // Toggle off if already visible and no new text selected
                     e.preventDefault();
                     e.stopPropagation();
-                    showQuickAnswerHUD(selectedText);
+                    hideQuickAnswerHUD();
+                } else {
+                    const textToAnswer = selectedText || getPageQuestionText() || currentQuickText;
+                    if (textToAnswer && textToAnswer.trim().length > 0) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        showQuickAnswerHUD(textToAnswer);
+                    }
+                }
+            }
+
+            // Alt + , (Option + , on macOS): Instantly HIDE Quick Short Answer HUD
+            const isKeyComma = e.code === "Comma" || (e.key && (e.key === "," || e.key === "≤")) || e.keyCode === 188;
+            if (modifierKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && isKeyComma) {
+                e.preventDefault();
+                e.stopPropagation();
+                hideQuickAnswerHUD();
+                if (isOverlayVisible) {
+                    toggleChatOverlay(false);
                 }
             }
 
@@ -2890,6 +2911,37 @@ if (typeof window.isMac === 'undefined') {
                 }
             }
         });
+
+        // Helper to extract question text from DOM when no text is explicitly selected
+        function getPageQuestionText() {
+            try {
+                if (typeof findQuestionElement === "function") {
+                    const el = findQuestionElement();
+                    if (el && el.innerText && el.innerText.trim()) return el.innerText.trim();
+                }
+                const selectors = [
+                    'div[aria-labelledby="question-data"]',
+                    '.rich-text-content',
+                    'div[class*="rich-text-content"]',
+                    'div[class*="overflow-y-auto"] .rich-text-content',
+                    'testtaking-question .ql-editor',
+                    'div.ql-editor',
+                    '#ttQuestionContainer',
+                    'div[aria-labelledby="question-answer"]',
+                    '.question-text',
+                    '.question-title',
+                    '#question-view',
+                    '[data-slot="card"]'
+                ];
+                for (const s of selectors) {
+                    const el = document.querySelector(s);
+                    if (el && el.innerText && el.innerText.trim()) {
+                        return el.innerText.trim();
+                    }
+                }
+            } catch(e) {}
+            return '';
+        }
 
         // Helper to extract currently selected text from document, inputs, or code editors
         function getPageSelectedText() {
@@ -2922,6 +2974,18 @@ if (typeof window.isMac === 'undefined') {
                     }
                 } catch (e) {}
             }
+            if (!text) {
+                try {
+                    const cmEditors = document.querySelectorAll('.cm-content');
+                    for (const ed of cmEditors) {
+                        const sel = window.getSelection();
+                        if (sel && sel.toString() && ed.contains(sel.anchorNode)) {
+                            text = sel.toString().trim();
+                            break;
+                        }
+                    }
+                } catch (e) {}
+            }
             return text;
         }
 
@@ -2933,7 +2997,7 @@ if (typeof window.isMac === 'undefined') {
         let quickHudEl = null;
         let currentQuickText = "";
         let quickHudOpacityIndex = 0;
-        const quickHudOpacities = [0.78, 0.40, 0.95];
+        const quickHudOpacities = [0.22, 0.10, 0.40, 0.70];
 
         function createQuickAnswerHUD() {
             if (quickHudHost && quickHudRoot && quickHudEl) {
@@ -2968,12 +3032,12 @@ if (typeof window.isMac === 'undefined') {
                 width: 320px !important;
                 max-width: 90vw !important;
                 max-height: 250px !important;
-                background: rgba(15, 23, 42, 0.78) !important;
-                backdrop-filter: blur(16px) saturate(180%) !important;
-                -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
-                border: 1px solid rgba(255, 255, 255, 0.20) !important;
+                background: rgba(15, 23, 42, 0.22) !important;
+                backdrop-filter: blur(14px) saturate(180%) !important;
+                -webkit-backdrop-filter: blur(14px) saturate(180%) !important;
+                border: 1px solid rgba(255, 255, 255, 0.14) !important;
                 border-radius: 12px !important;
-                box-shadow: 0 12px 36px rgba(0, 0, 0, 0.38), inset 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), inset 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
                 color: #f1f5f9 !important;
                 font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
                 font-size: 12.5px !important;
@@ -2985,23 +3049,23 @@ if (typeof window.isMac === 'undefined') {
                 user-select: text !important;
                 box-sizing: border-box !important;
                 z-index: 2147483647 !important;
-                transition: opacity 0.2s ease !important;
+                transition: opacity 0.2s ease, background 0.2s ease !important;
             `;
 
             quickHudEl.innerHTML = `
-                <div id="quick-hud-header" style="display: flex !important; align-items: center !important; justify-content: space-between !important; padding: 7px 10px !important; background: rgba(255, 255, 255, 0.08) !important; border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important; cursor: move !important; user-select: none !important;">
+                <div id="quick-hud-header" style="display: flex !important; align-items: center !important; justify-content: space-between !important; padding: 6px 10px !important; background: rgba(255, 255, 255, 0.05) !important; border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important; cursor: move !important; user-select: none !important;">
                     <div style="display: flex !important; align-items: center !important; gap: 6px !important; font-weight: 700 !important; font-size: 11px !important; color: #38bdf8 !important; letter-spacing: 0.3px !important;">
                         <span>⚡</span>
                         <span>Quick Answer</span>
                     </div>
                     <div style="display: flex !important; align-items: center !important; gap: 6px !important;">
-                        <button id="quick-hud-ghost" title="Toggle transparency" style="background: rgba(255, 255, 255, 0.12) !important; border: 1px solid rgba(255, 255, 255, 0.2) !important; border-radius: 4px !important; color: #94a3b8 !important; font-size: 10px !important; font-weight: 600 !important; padding: 2px 6px !important; cursor: pointer !important;">Ghost</button>
+                        <button id="quick-hud-ghost" title="Toggle transparency" style="background: rgba(255, 255, 255, 0.08) !important; border: 1px solid rgba(255, 255, 255, 0.15) !important; border-radius: 4px !important; color: #94a3b8 !important; font-size: 10px !important; font-weight: 600 !important; padding: 2px 6px !important; cursor: pointer !important;">Ghost</button>
                         <button id="quick-hud-copy" title="Copy answer" style="background: transparent !important; border: none !important; color: #94a3b8 !important; font-size: 12px !important; cursor: pointer !important; padding: 0 3px !important;">📋</button>
                         <button id="quick-hud-chat" title="Open in full Chatbot" style="background: transparent !important; border: none !important; color: #38bdf8 !important; font-size: 12px !important; cursor: pointer !important; padding: 0 3px !important;">💬</button>
                         <button id="quick-hud-close" title="Close (Esc)" style="background: transparent !important; border: none !important; color: #94a3b8 !important; font-size: 15px !important; line-height: 1 !important; cursor: pointer !important; padding: 0 3px !important;">×</button>
                     </div>
                 </div>
-                <div id="quick-hud-body" style="padding: 10px 12px !important; overflow-y: auto !important; max-height: 195px !important; font-size: 12px !important; word-break: break-word !important; color: #e2e8f0 !important;">
+                <div id="quick-hud-body" style="padding: 10px 12px !important; overflow-y: auto !important; max-height: 195px !important; font-size: 12px !important; word-break: break-word !important; color: #e2e8f0 !important; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6) !important;">
                     <div id="quick-hud-loading" style="display: flex !important; align-items: center !important; gap: 8px !important; color: #94a3b8 !important;">
                         <span style="display: inline-block !important; animation: quickPulse 1.2s infinite ease-in-out !important; color: #38bdf8 !important;">●</span>
                         <span>Generating short answer...</span>
@@ -3154,7 +3218,8 @@ if (typeof window.isMac === 'undefined') {
                             .replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.15); padding: 1px 4px; border-radius: 3px; font-family: monospace; color: #38bdf8;">$1</code>');
                         textEl.innerHTML = `<div style="line-height: 1.45; font-size: 12px; color: #f8fafc; font-weight: 500;">${formatted}</div>`;
                     } else {
-                        const err = (response && response.error) ? response.error : "Could not generate answer. Check API keys.";
+                        const rawErr = (response && response.error) ? String(response.error) : "Could not generate answer. Check API keys.";
+                        const err = rawErr.replace(/</g, "&lt;").replace(/>/g, "&gt;");
                         textEl.innerHTML = `<span style="color: #f87171; font-size: 11.5px;">${err}</span>`;
                     }
                 });
@@ -3162,7 +3227,8 @@ if (typeof window.isMac === 'undefined') {
                 if (loadingEl) loadingEl.style.display = "none";
                 if (textEl) {
                     textEl.style.display = "block";
-                    textEl.innerHTML = `<span style="color: #f87171; font-size: 11.5px;">Connection error: ${err.message}</span>`;
+                    const safeErrMsg = String(err.message || err).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    textEl.innerHTML = `<span style="color: #f87171; font-size: 11.5px;">Connection error: ${safeErrMsg}</span>`;
                 }
             }
         }
@@ -3171,6 +3237,14 @@ if (typeof window.isMac === 'undefined') {
         window.addEventListener("neoQuickAnswer", (e) => {
             if (e.detail && e.detail.text) {
                 showQuickAnswerHUD(e.detail.text);
+            }
+        });
+
+        // Listen for instant hide HUD shortcut (Alt + ,)
+        window.addEventListener("neoHideQuickHUD", () => {
+            hideQuickAnswerHUD();
+            if (chatOverlay && chatOverlay.style.display !== "none") {
+                chatOverlay.style.display = "none";
             }
         });
 

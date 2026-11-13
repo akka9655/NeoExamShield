@@ -27,86 +27,62 @@ script.src = chrome.runtime.getURL('data/inject/exam.js');
 
 // Function removed - login check no longer required for extension features
 
-// Neo Browser Download Link - Updated
-const neoBrowserDownloadLink = "https://neoexamshield.vercel.app";
+// Clean up any previously injected browser unlock button if present
+try {
+  const existingBtn = document.getElementById('neoexamshield-browser-btn');
+  if (existingBtn) existingBtn.remove();
+  const existingStyle = document.querySelector('style[data-neobrowser-style]');
+  if (existingStyle) existingStyle.remove();
+} catch (e) {}
 
-// Function to add our NeoExamShield button left of the existing Neo Browser button
-function replaceNeoBrowserButton() {
-  const neoButton = document.querySelector('button#neobrowser');
+// Function to detect browser restriction dialogs and inject 1-click Chrome bypass
+function checkAndHandleBrowserWarning() {
+  const elements = document.querySelectorAll('div, p, span, h3, h4, app-modal, .modal-body, .alert');
+  for (const el of elements) {
+    if (el.dataset && el.dataset.neoBypassChecked) continue;
+    const txt = (el.innerText || el.textContent || '').trim();
+    if (txt.includes('Please use latest version of Google Chrome') || 
+        txt.includes('This Browser will be supported soon')) {
+      el.dataset.neoBypassChecked = 'true';
 
-  if (neoButton && !neoButton.dataset.replaced) {
-    // Create custom styled button/link
-    const ourBtn = document.createElement('a');
-    ourBtn.innerHTML = `
-      <div class="container jcc btn-align">
-        <div class="t-whitespace-nowrap ng-star-inserted">
-          <span>Download NeoExamShield Launcher</span>
-        </div>
-      </div>
-    `;
-    ourBtn.href = neoBrowserDownloadLink;
-    ourBtn.target = "_blank";
-    ourBtn.className = neoButton.className;
-    ourBtn.id = "neoexamshield-browser-btn";
-    ourBtn.tabIndex = 0;
+      const isBrave = Boolean(navigator.brave || window.brave);
+      const bLabel = isBrave ? 'Brave' : (navigator.userAgent.includes('Edg') ? 'Edge' : 'Browser');
 
-    // Apply gradient styling
-    ourBtn.style.cssText = `
-      position: relative !important;
-      display: inline-flex !important;
-      padding: 8px 16px !important;
-      font-size: 14px !important;
-      font-weight: 500 !important;
-      color: white !important;
-      background-color: black !important;
-      border-radius: 8px !important;
-      text-align: center !important;
-      text-decoration: none !important;
-      cursor: pointer !important;
-      z-index: 1 !important;
-      border: 2px solid transparent !important;
-      transition: all 0.3s ease !important;
-    `;
-
-    // Create gradient border effect
-    const beforeStyle = document.createElement('style');
-    beforeStyle.textContent = `
-      a#neoexamshield-browser-btn {
-        position: relative !important;
-        background: linear-gradient(black, black) padding-box,
-                    linear-gradient(45deg, #3b82f6, #8b5cf6, #ec4899) border-box !important;
-        border: 2px solid transparent !important;
-      }
-      a#neoexamshield-browser-btn:hover {
-        transform: scale(1.05) !important;
-        box-shadow: 0 0 20px rgba(139, 92, 246, 0.6) !important;
-      }
-    `;
-    if (!document.querySelector('style[data-neobrowser-style]')) {
-      beforeStyle.setAttribute('data-neobrowser-style', 'true');
-      (document.head || document.documentElement)?.appendChild(beforeStyle);
+      const fixBtn = document.createElement('button');
+      fixBtn.type = 'button';
+      fixBtn.id = 'neo-fix-chrome-btn';
+      fixBtn.innerHTML = `⚡ Unlock in ${bLabel} (Switch to Chrome Mode)`;
+      fixBtn.style.cssText = `
+        margin-top: 10px;
+        padding: 8px 18px;
+        background: #1686FF;
+        color: white;
+        font-weight: 700;
+        font-size: 13px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        display: inline-block;
+        box-shadow: 0 4px 12px rgba(22, 134, 255, 0.35);
+        transition: transform 0.15s ease;
+      `;
+      fixBtn.onclick = (e) => {
+        e.preventDefault();
+        fixBtn.textContent = 'Switching to Chrome Mode...';
+        chrome.runtime.sendMessage({ action: 'setBrowserBypass', mode: 'chrome' }, () => {
+          try { localStorage.setItem('neo_browser_bypass_mode', 'chrome'); } catch(err) {}
+          setTimeout(() => window.location.reload(), 350);
+        });
+      };
+      el.appendChild(fixBtn);
+      break;
     }
-
-    // Insert our button to the left of the existing button
-    neoButton.parentNode.insertBefore(ourBtn, neoButton);
-
-    // Make the parent (app-button) a flex row so both buttons sit side by side
-    neoButton.parentNode.style.cssText += `
-      display: flex !important;
-      flex-direction: row !important;
-      align-items: center !important;
-      gap: 8px !important;
-    `;
-
-    neoButton.dataset.replaced = "true";
-
-    console.log('✅ NeoExamShield Launcher button added left of existing Neo Browser button');
   }
 }
 
-// Observer to detect Neo Browser button and add our button
+// Observer to detect browser restriction dialogs
 const buttonObserver = new MutationObserver((mutations) => {
-  replaceNeoBrowserButton();
+  checkAndHandleBrowserWarning();
 });
 
 // Start observing for button changes safely
@@ -132,11 +108,13 @@ function startButtonObserver() {
 }
 startButtonObserver();
 
-// Initial check for Neo Browser button (in case already loaded)
+// Initial check for browser warnings (in case already loaded)
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', replaceNeoBrowserButton);
+  document.addEventListener('DOMContentLoaded', () => {
+    checkAndHandleBrowserWarning();
+  });
 } else {
-  replaceNeoBrowserButton();
+  checkAndHandleBrowserWarning();
 }
 
 // Listen for window messages
