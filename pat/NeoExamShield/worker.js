@@ -822,10 +822,39 @@ function stripMainFunction(code) {
     let result = code;
     let safetyCounter = 0;
     while (safetyCounter++ < 5) {
-        const mainMatch = /(?:int|void)?\s*main\s*\([^)]*\)\s*\{/.exec(result);
+        const mainMatch = /(?:int|void|public\s+static\s+void)?\s*main\s*\([^)]*\)\s*\{/.exec(result);
         if (!mainMatch) break;
 
         const startIndex = mainMatch.index;
+        const braceStart = result.indexOf('{', startIndex);
+        if (braceStart === -1) break;
+
+        let depth = 1;
+        let endIndex = braceStart + 1;
+        while (endIndex < result.length && depth > 0) {
+            const ch = result[endIndex];
+            if (ch === '{') depth++;
+            else if (ch === '}') depth--;
+            endIndex++;
+        }
+
+        const before = result.substring(0, startIndex).trim();
+        const after = result.substring(endIndex).trim();
+        result = [before, after].filter(Boolean).join('\n\n').trim();
+    }
+    return result.trim();
+}
+
+// Helper to remove any class definition by name (with balanced braces)
+function stripClassDeclaration(code, className) {
+    if (!code || !className) return code;
+    let result = code;
+    let safetyCounter = 0;
+    while (safetyCounter++ < 5) {
+        const classMatch = new RegExp(`(?:public\\s+|private\\s+|protected\\s+|static\\s+)*class\\s+${className}\\b[^{]*\\{`).exec(result);
+        if (!classMatch) break;
+
+        const startIndex = classMatch.index;
         const braceStart = result.indexOf('{', startIndex);
         if (braceStart === -1) break;
 
@@ -859,7 +888,16 @@ function cleanCenterCode(cleanedCode, headerSnippet = '', footerSnippet = '') {
         result = stripMainFunction(result);
     }
 
-    // If header exists, strip duplicate struct/class declarations, #defines, and #includes
+    // If footer has class declarations (such as class Main or public class Main), strip those classes from center code
+    if (hasFooter) {
+        const classMatches = footerSnippet.matchAll(/(?:public\s+|private\s+|protected\s+|static\s+)*class\s+([a-zA-Z0-9_]+)\b/g);
+        for (const match of classMatches) {
+            const className = match[1];
+            result = stripClassDeclaration(result, className);
+        }
+    }
+
+    // If header exists, strip duplicate struct/class declarations, #defines, #includes, and import statements
     if (hasHeader) {
         const typeRegex = /(?:typedef\s+)?(?:struct|class)\s+([a-zA-Z0-9_]+)\s*\{/g;
         let tm;
@@ -879,6 +917,12 @@ function cleanCenterCode(cleanedCode, headerSnippet = '', footerSnippet = '') {
         for (const inc of headerIncludes) {
             const trimmedInc = inc.trim();
             result = result.split('\n').filter(l => l.trim() !== trimmedInc).join('\n').trim();
+        }
+
+        const headerImports = headerSnippet.split('\n').filter(l => l.trim().startsWith('import ') && l.trim().endsWith(';'));
+        for (const imp of headerImports) {
+            const trimmedImp = imp.trim();
+            result = result.split('\n').filter(l => l.trim() !== trimmedImp).join('\n').trim();
         }
     }
 
@@ -939,9 +983,17 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                             if (!el) return false;
                             var id = (el.id || '').toLowerCase();
                             if (id.includes('header') || id.includes('footer') || id.includes('correct') || id.endsWith('editor2')) return false;
-                            if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('[aria-labelledby="correct-answer-cont"]') || el.closest('[aria-labelledby="correct-answer-mark-cont"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
-                                return false;
+                            if (el.closest) {
+                                if (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('[aria-labelledby="correct-answer-cont"]') || el.closest('[aria-labelledby="correct-answer-mark-cont"]') || el.closest('.header-content') || el.closest('.footer-content')) {
+                                    return false;
+                                }
+                                var card = el.closest('.rounded-xl, .rounded-lg, .border, .flex-col');
+                                if (card) {
+                                    var txt = card.innerText || card.textContent || '';
+                                    if (txt.includes('Header Snippet') || txt.includes('Footer Snippet')) return false;
+                                }
                             }
+                            if (el.getAttribute && el.getAttribute('contenteditable') === 'false') return false;
                             return true;
                         }
                         var answerElCandidates = [
@@ -987,10 +1039,40 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                             }
                         }
                         // CodeMirror 6 Support (modern Iamneo UI)
-                        var cmContent = document.querySelector('#programming-editor .cm-content, .cm-editor .cm-content, .cm-content[contenteditable="true"]');
-                        if (cmContent) {
+                        var cmContent = document.querySelector('#programming-editor .cm-content[contenteditable="true"], .cm-content[contenteditable="true"], #programming-editor .cm-content');
+                        if (cmContent && isStrictAnswer(cmContent)) {
                             var cmEditor = cmContent.closest('.cm-editor') || cmContent;
                             var view = cmEditor.cmView?.view || cmContent.cmView?.view || cmEditor._view;
+                            if (!view) {
+                                var targets = [cmEditor, cmContent, cmEditor.parentElement, document.getElementById('programming-editor')].filter(Boolean);
+                                for (var ti = 0; ti < targets.length; ti++) {
+                                    try {
+                                        var fkey = Object.keys(targets[ti]).find(function(k) { return k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'); });
+                                        if (!fkey) continue;
+                                        var f = targets[ti][fkey];
+                                        var d = 0;
+                                        while (f && d < 12) {
+                                            var h = f.memoizedState;
+                                            var hd = 0;
+                                            while (h && hd < 25) {
+                                                if (h.memoizedState && typeof h.memoizedState === 'object') {
+                                                    var cand = h.memoizedState.current || h.memoizedState;
+                                                    if (cand && typeof cand.dispatch === 'function' && cand.state && cand.state.doc) {
+                                                        view = cand;
+                                                        break;
+                                                    }
+                                                }
+                                                h = h.next;
+                                                hd++;
+                                            }
+                                            if (view) break;
+                                            f = f.return;
+                                            d++;
+                                        }
+                                        if (view) break;
+                                    } catch(e) {}
+                                }
+                            }
                             if (view && view.dispatch && view.state) {
                                 try {
                                     view.dispatch({
@@ -1000,6 +1082,18 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                                     return;
                                 } catch(e) {}
                             }
+                            try {
+                                cmContent.focus();
+                                var sel = window.getSelection();
+                                var range = document.createRange();
+                                range.selectNodeContents(cmContent);
+                                sel.removeAllRanges();
+                                sel.addRange(range);
+                                document.execCommand('insertText', false, code);
+                                cmContent.dispatchEvent(new Event('input', { bubbles: true }));
+                                cmContent.dispatchEvent(new Event('change', { bubbles: true }));
+                                return;
+                            } catch(e) {}
                         }
                         // Monaco Editor Support
                         if (window.monaco && window.monaco.editor) {
@@ -2552,11 +2646,11 @@ Respond with ONLY the ${request.programmingLanguage} code inside a single code b
                             environmentArchitecture = `CRITICAL ARCHITECTURE: THREE-PART SPLIT ENVIRONMENT (HEADER + YOUR CODE + FOOTER).
 - The platform has ALREADY provided a FIXED Header Snippet at the top and a FIXED Footer Snippet at the bottom.
 - Your code will be placed directly in the EDITABLE CENTER EDITOR between Header and Footer.
-- STRICT RULE: Implement ALL required functions called in the Footer Snippet or described in the problem statement.
-- STRICT RULE: Every function MUST be complete with its FULL signature (return type, function name, parameter list, and opening/closing braces), e.g. 'double calculateTicketCost() { ... }'. DO NOT omit function return types or signatures under any circumstances.
-- STRICT RULE: DO NOT write any #include headers (they are already provided in the Header Snippet).
-- STRICT RULE: DO NOT write main() (main() is already fully implemented in the Footer Snippet).
-- Ensure your function names, parameter signatures, and return types match EXACTLY what the Footer calls.`;
+- STRICT RULE: Implement ALL required classes and functions called in the Footer Snippet or described in the problem statement.
+- STRICT RULE: Every function/method MUST be complete with its FULL signature (return type, function name, parameter list, and opening/closing braces), e.g. 'double calculateTicketCost() { ... }'. DO NOT omit function return types or signatures under any circumstances.
+- STRICT RULE: DO NOT write any #include headers or import statements (they are already provided in the Header Snippet).
+- STRICT RULE: DO NOT write main() or the class containing main() (such as 'public class Main', which is already fully implemented in the Footer Snippet). Only implement the required supporting classes/methods.
+- Ensure all class and function names, parameter signatures, and return types match EXACTLY what the Footer calls.`;
                         } else if (hasHeader && !hasFooter) {
                             environmentArchitecture = `CRITICAL ARCHITECTURE: FIXED HEADER SNIPPET PROVIDED.
 - The platform has ALREADY provided a FIXED Header Snippet at the top.

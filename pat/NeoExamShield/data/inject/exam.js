@@ -25,7 +25,93 @@ if (typeof window.isMac === 'undefined') {
     if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('[aria-labelledby="correct-answer-cont"]') || el.closest('[aria-labelledby="correct-answer-mark-cont"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
       return false;
     }
+    // CodeMirror 6 checks: exclude if inside a card labeled Header or Footer Snippet, or if readonly
+    if (el.closest) {
+      const card = el.closest('.rounded-xl, .rounded-lg, .border, .flex-col');
+      if (card) {
+        const txt = card.innerText || card.textContent || '';
+        if (txt.includes('Header Snippet') || txt.includes('Footer Snippet')) return false;
+      }
+    }
+    if (el.getAttribute && el.getAttribute('contenteditable') === 'false') return false;
+    const content = el.querySelector?.('.cm-content');
+    if (content && content.getAttribute('contenteditable') === 'false') return false;
     return true;
+  }
+
+  // Retrieve unvirtualized CodeMirror 6 EditorView instance directly or via React Fiber
+  function getCodeMirror6View(el) {
+    if (!el) return null;
+    if (el.cmView && el.cmView.view) return el.cmView.view;
+    if (el._view && typeof el._view.dispatch === 'function') return el._view;
+    if (el.view && typeof el.view.dispatch === 'function') return el.view;
+
+    const content = el.classList?.contains('cm-content') ? el : el.querySelector?.('.cm-content');
+    if (content) {
+      if (content.cmView && content.cmView.view) return content.cmView.view;
+      if (content._view && typeof content._view.dispatch === 'function') return content._view;
+    }
+
+    const editor = el.classList?.contains('cm-editor') ? el : (el.closest?.('.cm-editor') || el.querySelector?.('.cm-editor'));
+    if (editor) {
+      if (editor.cmView && editor.cmView.view) return editor.cmView.view;
+      if (editor._view && typeof editor._view.dispatch === 'function') return editor._view;
+    }
+
+    // Traverse React Fiber to locate CodeMirrorEditor state hooks
+    const targets = [el, content, editor, el.parentElement, document.getElementById('programming-editor')].filter(Boolean);
+    for (const target of targets) {
+      try {
+        const fiberKey = Object.keys(target).find(k => k.startsWith('__reactFiber$') || k.startsWith('__reactInternalInstance$'));
+        if (!fiberKey) continue;
+        let fiber = target[fiberKey];
+        let depth = 0;
+        while (fiber && depth < 12) {
+          let hook = fiber.memoizedState;
+          let hookDepth = 0;
+          while (hook && hookDepth < 25) {
+            if (hook.memoizedState && typeof hook.memoizedState === 'object') {
+              const candidate = hook.memoizedState.current || hook.memoizedState;
+              if (candidate && typeof candidate.dispatch === 'function' && candidate.state && candidate.state.doc) {
+                return candidate;
+              }
+            }
+            hook = hook.next;
+            hookDepth++;
+          }
+          if (fiber.stateNode && typeof fiber.stateNode.dispatch === 'function' && fiber.stateNode.state?.doc) {
+            return fiber.stateNode;
+          }
+          fiber = fiber.return;
+          depth++;
+        }
+      } catch(e) {}
+    }
+    return null;
+  }
+
+  // Read clean code text from CodeMirror 6 editor without gutter line numbers or virtualization gaps
+  function getCodeMirror6Text(el) {
+    if (!el) return '';
+    const view = getCodeMirror6View(el);
+    if (view && view.state && view.state.doc) {
+      try {
+        const str = view.state.doc.toString();
+        if (str && str.trim()) return str.trim();
+      } catch(e) {}
+    }
+    const content = el.classList?.contains('cm-content') ? el : el.querySelector?.('.cm-content');
+    const root = content || el;
+    const lines = root.querySelectorAll?.('.cm-line');
+    if (lines && lines.length > 0) {
+      return Array.from(lines).map(l => l.textContent).join('\n').trim();
+    }
+    const clone = root.cloneNode ? root.cloneNode(true) : null;
+    if (clone) {
+      clone.querySelectorAll?.('.cm-gutters, .cm-gap, .cm-announced').forEach(g => g.remove());
+      return (clone.innerText || clone.textContent || '').trim();
+    }
+    return (root.innerText || root.textContent || '').trim();
   }
 
   // Find the answer editor on the page (supports Ace, CodeMirror 6, Monaco, Textarea)
@@ -66,16 +152,31 @@ if (typeof window.isMac === 'undefined') {
       } catch(e) {}
     }
 
-    // Check 3: Modern CodeMirror 6 editor (used in new Iamneo / PAT portal UI in new m.md)
-    const cmContent = document.querySelector('#programming-editor .cm-content, .cm-editor .cm-content, .cm-content[contenteditable="true"]');
-    if (cmContent) {
+    // Check 3: Modern CodeMirror 6 editor (used in new Iamneo / PAT portal UI in data3 / m.md)
+    let cmContent = document.querySelector('#programming-editor .cm-content[contenteditable="true"], .cm-content[contenteditable="true"]');
+    if (!cmContent) {
+      const allCm = document.querySelectorAll('.cm-content');
+      for (const cm of allCm) {
+        if (isStrictAnswerEditor(cm) && cm.getAttribute('contenteditable') !== 'false') {
+          cmContent = cm;
+          break;
+        }
+      }
+    }
+    if (!cmContent) {
+      const pe = document.querySelector('#programming-editor');
+      if (pe) {
+        cmContent = pe.querySelector('.cm-content');
+      }
+    }
+    if (cmContent && isStrictAnswerEditor(cmContent)) {
       const cmEditor = cmContent.closest('.cm-editor') || cmContent;
       return {
         isCodeMirror6: true,
         element: cmContent,
         getReadOnly: () => cmContent.getAttribute('contenteditable') === 'false',
         setValue: function(code) {
-          const view = cmEditor.cmView?.view || cmContent.cmView?.view || cmEditor._view;
+          const view = getCodeMirror6View(cmEditor) || getCodeMirror6View(cmContent);
           if (view && view.dispatch && view.state) {
             try {
               view.dispatch({
@@ -112,6 +213,11 @@ if (typeof window.isMac === 'undefined') {
         },
         navigateFileEnd: function() {
           try {
+            const view = getCodeMirror6View(cmEditor) || getCodeMirror6View(cmContent);
+            if (view && view.dispatch && view.state) {
+              view.dispatch({ selection: { anchor: view.state.doc.length } });
+              return;
+            }
             cmContent.focus();
             const sel = window.getSelection();
             const range = document.createRange();
@@ -122,10 +228,17 @@ if (typeof window.isMac === 'undefined') {
           } catch(e) {}
         },
         focus: function() {
-          try { cmContent.focus(); } catch(e) {}
+          try {
+            const view = getCodeMirror6View(cmEditor) || getCodeMirror6View(cmContent);
+            if (view && typeof view.focus === 'function') {
+              view.focus();
+              return;
+            }
+            cmContent.focus();
+          } catch(e) {}
         },
         insert: function(ch) {
-          const view = cmEditor.cmView?.view || cmContent.cmView?.view;
+          const view = getCodeMirror6View(cmEditor) || getCodeMirror6View(cmContent);
           if (view && view.dispatch && view.state) {
             try {
               const pos = view.state.selection.main.head;
@@ -418,6 +531,35 @@ if (typeof window.isMac === 'undefined') {
     return result.trim();
   }
 
+  // Helper to remove any class definition by name (with balanced braces)
+  function stripClassDeclaration(code, className) {
+    if (!code || !className) return code;
+    let result = code;
+    let safetyCounter = 0;
+    while (safetyCounter++ < 5) {
+      const classMatch = new RegExp(`(?:public\\s+|private\\s+|protected\\s+|static\\s+)*class\\s+${className}\\b[^{]*\\{`).exec(result);
+      if (!classMatch) break;
+
+      const startIndex = classMatch.index;
+      const braceStart = result.indexOf('{', startIndex);
+      if (braceStart === -1) break;
+
+      let depth = 1;
+      let endIndex = braceStart + 1;
+      while (endIndex < result.length && depth > 0) {
+        const ch = result[endIndex];
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+        endIndex++;
+      }
+
+      const before = result.substring(0, startIndex).trim();
+      const after = result.substring(endIndex).trim();
+      result = [before, after].filter(Boolean).join('\n\n').trim();
+    }
+    return result.trim();
+  }
+
   // Ensures only the center part of the code is inserted (removes headers/main if header/footer provided)
   function cleanCenterCode(cleanedCode, headerSnippet = '', footerSnippet = '') {
     if (!cleanedCode) return '';
@@ -432,7 +574,16 @@ if (typeof window.isMac === 'undefined') {
       result = stripMainFunction(result);
     }
 
-    // If header exists, strip duplicate struct/class declarations, #defines, and #includes
+    // If footer has class declarations (such as class Main or public class Main), strip those classes from center code
+    if (hasFooter) {
+      const classMatches = footerSnippet.matchAll(/(?:public\s+|private\s+|protected\s+|static\s+)*class\s+([a-zA-Z0-9_]+)\b/g);
+      for (const match of classMatches) {
+        const className = match[1];
+        result = stripClassDeclaration(result, className);
+      }
+    }
+
+    // If header exists, strip duplicate struct/class declarations, #defines, #includes, and import statements
     if (hasHeader) {
       const typeRegex = /(?:typedef\s+)?(?:struct|class)\s+([a-zA-Z0-9_]+)\s*\{/g;
       let tm;
@@ -452,6 +603,12 @@ if (typeof window.isMac === 'undefined') {
       for (const inc of headerIncludes) {
         const trimmedInc = inc.trim();
         result = result.split('\n').filter(l => l.trim() !== trimmedInc).join('\n').trim();
+      }
+
+      const headerImports = headerSnippet.split('\n').filter(l => l.trim().startsWith('import ') && l.trim().endsWith(';'));
+      for (const imp of headerImports) {
+        const trimmedImp = imp.trim();
+        result = result.split('\n').filter(l => l.trim() !== trimmedImp).join('\n').trim();
       }
     }
 
@@ -488,10 +645,49 @@ if (typeof window.isMac === 'undefined') {
     const footerEl = document.querySelector('[id*="ttFooterEditor"], [id*="FooterEditor"], [id*="footerEditor"], [aria-labelledby="footer"] .ace_editor, .footer-content .ace_editor');
     const centerEl = document.querySelector('div[aria-labelledby="answer"] .ace_editor, [id*="ttAnswerEditor"]:not([id*="Editor2"]), [aria-labelledby="editor-answer"]:not([id*="Editor2"]), .answer-content .ace_editor');
 
+    let headerSnippet = getVal(headerEl);
+    let footerSnippet = getVal(footerEl);
+    let starterCode = getVal(centerEl);
+
+    // CodeMirror 6 Three-Part Split detection (Iamneo / Next.js UI in data3)
+    if (!headerSnippet || !footerSnippet || !starterCode) {
+      const cmEditors = Array.from(document.querySelectorAll('.cm-editor'));
+      if (cmEditors.length > 0) {
+        let cmHeader = null;
+        let cmFooter = null;
+        let cmCenter = null;
+
+        cmEditors.forEach((ed, idx) => {
+          const card = ed.closest('.rounded-xl, .rounded-lg, .border, .flex-col') || ed.parentElement;
+          const cardText = card ? (card.innerText || card.textContent || '') : '';
+          const isHeader = cardText.includes('Header Snippet');
+          const isFooter = cardText.includes('Footer Snippet');
+          const content = ed.querySelector('.cm-content');
+          const isReadOnly = content ? (content.getAttribute('contenteditable') === 'false') : false;
+          const isProgrammingEditor = Boolean(ed.closest('#programming-editor') || ed.id === 'programming-editor');
+
+          if (isHeader) {
+            cmHeader = ed;
+          } else if (isFooter) {
+            cmFooter = ed;
+          } else if (isProgrammingEditor || (!isReadOnly && !isHeader && !isFooter)) {
+            cmCenter = ed;
+          } else if (isReadOnly) {
+            if (!cmHeader && idx === 0) cmHeader = ed;
+            else if (!cmFooter) cmFooter = ed;
+          }
+        });
+
+        if (!headerSnippet && cmHeader) headerSnippet = getCodeMirror6Text(cmHeader);
+        if (!footerSnippet && cmFooter) footerSnippet = getCodeMirror6Text(cmFooter);
+        if (!starterCode && cmCenter) starterCode = getCodeMirror6Text(cmCenter);
+      }
+    }
+
     return {
-      headerSnippet: getVal(headerEl),
-      footerSnippet: getVal(footerEl),
-      starterCode: getVal(centerEl)
+      headerSnippet: headerSnippet || '',
+      footerSnippet: footerSnippet || '',
+      starterCode: starterCode || ''
     };
   }
 

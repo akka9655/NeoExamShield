@@ -1170,7 +1170,7 @@ async function extractCodingQuestion(isTyped = false) {
     });
     whitelistText = whitelistText.trim();
 
-    // Helper to safely extract full editor content (handles Ace virtualization and textarea)
+    // Helper to safely extract full editor content (handles Ace virtualization, CodeMirror 6, and textarea)
     function getEditorSnippet(el) {
         if (!el) return '';
         try {
@@ -1187,9 +1187,21 @@ async function extractCodingQuestion(isTyped = false) {
                 }
             }
         } catch(e) {}
+        // CodeMirror 6 line extraction (avoids gutter line numbers)
+        const cmLines = el.querySelectorAll('.cm-line');
+        if (cmLines && cmLines.length > 0) {
+            return Array.from(cmLines).map(l => l.textContent).join('\n').trim();
+        }
+        // Ace editor lines
         const lines = el.querySelectorAll('.ace_line');
         if (lines && lines.length > 0) {
             return Array.from(lines).map(line => line.textContent).join('\n').trim();
+        }
+        // Fallback without gutters/gaps
+        const clone = el.cloneNode ? el.cloneNode(true) : null;
+        if (clone) {
+            clone.querySelectorAll('.ace_gutter, .cm-gutters, .cm-gap, .cm-announced').forEach(g => g.remove());
+            return (clone.innerText || clone.textContent || '').trim();
         }
         return (el.innerText || el.textContent || '').trim();
     }
@@ -1219,15 +1231,43 @@ async function extractCodingQuestion(isTyped = false) {
         if (headerEditorEl) {
             headerSnippet = getEditorSnippet(headerEditorEl);
         }
+        if (!headerSnippet) {
+            const allCards = document.querySelectorAll('.rounded-xl, .rounded-lg, .border, .flex-col');
+            for (const card of allCards) {
+                if ((card.innerText || card.textContent || '').includes('Header Snippet')) {
+                    const ed = card.querySelector('.cm-editor, .cm-content');
+                    if (ed) {
+                        headerSnippet = getEditorSnippet(ed);
+                        if (headerSnippet) break;
+                    }
+                }
+            }
+        }
     }
     if (!footerSnippet) {
         const footerEditorEl = document.querySelector('div[aria-labelledby="footer"] .ace_editor, [id*="ttFooterEditor"], [id*="FooterEditor"], [id*="footerEditor"], .footer-content .ace_editor, .footer-editor');
         if (footerEditorEl) {
             footerSnippet = getEditorSnippet(footerEditorEl);
         }
+        if (!footerSnippet) {
+            const allCards = document.querySelectorAll('.rounded-xl, .rounded-lg, .border, .flex-col');
+            for (const card of allCards) {
+                if ((card.innerText || card.textContent || '').includes('Footer Snippet')) {
+                    const ed = card.querySelector('.cm-editor, .cm-content');
+                    if (ed) {
+                        footerSnippet = getEditorSnippet(ed);
+                        if (footerSnippet) break;
+                    }
+                }
+            }
+        }
     }
     if (!starterCode) {
         const centerEditorCandidates = [
+            document.querySelector('#programming-editor .cm-content[contenteditable="true"]'),
+            document.querySelector('#programming-editor .cm-content'),
+            document.querySelector('#programming-editor .cm-editor'),
+            document.querySelector('.cm-content[contenteditable="true"]'),
             document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
             document.querySelector('div[aria-labelledby="answer"] [id*="ttAnswerEditor"]'),
             document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"])'),
