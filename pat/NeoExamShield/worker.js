@@ -1522,7 +1522,7 @@ async function getCustomAPIConfigs() {
                         aiProvider: c.aiProvider || 'google',
                         customEndpoint: c.customEndpoint || '',
                         apiKey: String(c.apiKey).trim(),
-                        modelName: (c.modelName && !c.modelName.includes('gemini-3.')) ? c.modelName : 'gemini-2.0-flash',
+                        modelName: (c.modelName && String(c.modelName).trim()) ? String(c.modelName).trim() : 'gemini-2.0-flash',
                         isCustom: true
                     }));
                 userConfigs.push(...validConfigs);
@@ -1537,7 +1537,7 @@ async function getCustomAPIConfigs() {
                         aiProvider: result.aiProvider || 'google',
                         customEndpoint: result.customEndpoint || '',
                         apiKey: k,
-                        modelName: (result.customModelName && !result.customModelName.includes('gemini-3.')) ? result.customModelName : 'gemini-2.0-flash',
+                        modelName: (result.customModelName && String(result.customModelName).trim()) ? String(result.customModelName).trim() : 'gemini-2.0-flash',
                         isCustom: true
                     });
                 }
