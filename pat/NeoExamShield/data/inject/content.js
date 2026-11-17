@@ -1940,53 +1940,6 @@ function toggleSyncCodeHUD() {
                 font-family: monospace;
                 font-weight: 700;
             }
-            .bypass-row {
-                display: flex;
-                gap: 3px;
-                margin-top: 4px;
-                padding-top: 3px;
-                border-top: 1px solid rgba(255, 255, 255, 0.07);
-            }
-            .bypass-btn {
-                flex: 1;
-                background: rgba(255,255,255,0.06);
-                color: #94a3b8;
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 3px;
-                font-size: 7.5px;
-                font-weight: 600;
-                cursor: pointer;
-                padding: 2px 0;
-                transition: background 0.12s, color 0.12s, border-color 0.12s;
-                text-align: center;
-                white-space: nowrap;
-            }
-            .bypass-btn:hover {
-                background: rgba(255,255,255,0.12);
-                color: #e2e8f0;
-            }
-            .bypass-btn.active-chrome {
-                background: rgba(2, 132, 199, 0.75);
-                color: #fff;
-                border-color: rgba(56,189,248,0.4);
-            }
-            .bypass-btn.active-neo {
-                background: rgba(16, 185, 129, 0.7);
-                color: #fff;
-                border-color: rgba(74,222,128,0.4);
-            }
-            .bypass-btn.active-off {
-                background: rgba(100,116,139,0.5);
-                color: #cbd5e1;
-                border-color: rgba(148,163,184,0.3);
-            }
-            .bypass-label {
-                font-size: 7px;
-                color: #64748b;
-                text-align: center;
-                margin-top: 2px;
-                letter-spacing: 0.3px;
-            }
         </style>
         <div class="hud-card">
             <div class="hud-header">
@@ -1998,12 +1951,6 @@ function toggleSyncCodeHUD() {
                 <button class="hud-btn" type="button">Link</button>
             </div>
             <div class="hud-status">Enter code (e.g. 000)</div>
-            <div class="bypass-row" id="hud-bypass-row">
-                <button class="bypass-btn" data-mode="off" id="bp-off" title="No browser spoofing — native browser">Off</button>
-                <button class="bypass-btn" data-mode="neobrowser" id="bp-neo" title="Spoof as Neo Browser (for NeoBrowser-only tests)">Neo</button>
-                <button class="bypass-btn" data-mode="chrome" id="bp-chrome" title="Spoof as Chrome browser">Chrome</button>
-            </div>
-            <div class="bypass-label" id="hud-bypass-label">Browser: loading…</div>
             <div class="hud-footer">
                 <button class="hud-link" id="hud-toggle-sc" title="Toggle shortcut guide">Keys</button>
                 <button class="hud-link" id="hud-unlink" title="Clear linked API keys">Unlink</button>
@@ -2036,40 +1983,6 @@ function toggleSyncCodeHUD() {
     const scList = shadow.querySelector('#hud-shortcuts-list');
     const unlinkBtn = shadow.querySelector('#hud-unlink');
     const uninstallBtn = shadow.querySelector('#hud-uninstall');
-    const bpChrome = shadow.querySelector('#bp-chrome');
-    const bpNeo = shadow.querySelector('#bp-neo');
-    const bpOff = shadow.querySelector('#bp-off');
-    const bypassLabel = shadow.querySelector('#hud-bypass-label');
-
-    // Helper: update bypass button UI from mode string
-    const updateBypassBtns = (mode) => {
-        [bpChrome, bpNeo, bpOff].forEach(b => b && b.classList.remove('active-chrome', 'active-neo', 'active-off'));
-        const modeLabels = { chrome: 'Chrome (spoof)', neobrowser: 'Neo Browser', off: 'Native / Off' };
-        if (mode === 'chrome' && bpChrome) bpChrome.classList.add('active-chrome');
-        else if (mode === 'neobrowser' && bpNeo) bpNeo.classList.add('active-neo');
-        else if (mode === 'off' && bpOff) bpOff.classList.add('active-off');
-        if (bypassLabel) bypassLabel.textContent = 'Browser: ' + (modeLabels[mode] || mode);
-    };
-
-    // Load current bypass mode
-    chrome.runtime.sendMessage({ action: 'getBypassMode' }, (res) => {
-        const m = (res && res.mode) ? res.mode : 'chrome';
-        updateBypassBtns(m);
-    });
-
-    // Bypass button click handlers
-    [bpChrome, bpNeo, bpOff].forEach(btn2 => {
-        if (!btn2) return;
-        btn2.addEventListener('click', () => {
-            resetAutoHideTimer();
-            const newMode = btn2.getAttribute('data-mode');
-            chrome.runtime.sendMessage({ action: 'setBrowserBypass', mode: newMode }, (res) => {
-                updateBypassBtns(newMode);
-                if (bypassLabel) bypassLabel.textContent = 'Browser: set → reloading…';
-                setTimeout(() => chrome.runtime.sendMessage({ action: 'reloadActiveTab' }), 600);
-            });
-        });
-    });
 
     // Query current linked status
     chrome.runtime.sendMessage({ action: 'getSyncStatus' }, (res) => {
