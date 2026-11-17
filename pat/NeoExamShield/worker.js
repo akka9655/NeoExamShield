@@ -3828,20 +3828,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Candidate Telemetry Tracking to Firestore tracks collection
 const sessionTrackDebounceCache = {};
 
+function isValidCandidateName(str) {
+    if (!str || typeof str !== 'string') return false;
+    const clean = str.replace(/\$/g, ' ').replace(/\s+/g, ' ').trim();
+    if (clean.length < 2 || clean.length > 50) return false;
+    const lower = clean.toLowerCase();
+    const badWords = [
+        'neopat', 'powerbi', 'usage', 'dashboard', 'student', 'user', 'login', 'admin',
+        'profile', 'course', 'assessment', 'test', 'section', 'question', 'option',
+        'submit', 'theme', 'route:', 'http', 'select', 'loading', 'undefined', 'null',
+        'welcome', 'portal', 'home', 'examly', 'iamneo', 'psg tech', 'psg college'
+    ];
+    if (badWords.some(w => lower.includes(w))) return false;
+    return /^[a-zA-Z\s\.\,\'\-]+$/.test(clean);
+}
+
 async function handleTrackSession(data) {
     try {
         if (!data) return;
-        const name = (data.name || '').trim();
+        const name = (data.name || '').replace(/\$/g, ' ').replace(/\s+/g, ' ').trim();
         const rollNo = (data.rollNo || '').trim().toUpperCase();
-        const testName = (data.testName || '').trim();
+        let testName = (data.testName || '').trim();
 
         // Require a valid student name (not empty, not 'Student', not 'route:')
-        if (!name || name.toLowerCase() === 'student' || name.startsWith('route:') || name.length < 2) return;
+        if (!isValidCandidateName(name)) return;
 
-        // Ignore common non-exam titles if any leaked through
+        // Clean up and sanitize test name
         const lowerTest = testName.toLowerCase();
-        const ignoredTests = ['google account', 'google ai studio', 'api keys', 'set a home address', 'add a profile picture', 'sign in', 'rate limit', 'spend', 'warmup page', 'welcome', 'portal'];
+        const ignoredTests = ['google account', 'google ai studio', 'api keys', 'set a home address', 'add a profile picture', 'sign in', 'rate limit', 'spend', 'warmup page', 'welcome'];
         if (ignoredTests.some(t => lowerTest.includes(t))) return;
+
+        if (!testName || lowerTest === 'psg' || lowerTest === 'psg - pat' || lowerTest.includes('loading')) {
+            testName = 'PAT Portal Session';
+        }
 
         // Retrieve active linkedCode from storage if not passed
         let code = (data.code || '').trim();
@@ -3859,7 +3878,7 @@ async function handleTrackSession(data) {
         }
 
         const cleanRoll = rollNo ? rollNo.replace(/[^a-zA-Z0-9]/g, '_') : name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 24);
-        const cleanTest = (testName || 'TEST').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32);
+        const cleanTest = testName.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32);
         const docId = `${cleanRoll}_${cleanTest}`;
 
         // Guarantee strictly ONE write per student + test per session to protect Firebase free tier
@@ -3881,13 +3900,13 @@ async function handleTrackSession(data) {
                 degree: { stringValue: deptVal },
                 batch: { stringValue: String(data.batch || '') },
                 code: { stringValue: code },
-                testName: { stringValue: testName || 'Exam Session' },
+                testName: { stringValue: testName },
                 loginTime: { stringValue: data.loginTime || new Date().toLocaleString('en-IN') },
                 rollNo: { stringValue: rollNo || '' },
-                email: { stringValue: data.email || '' },
+                email: { stringValue: (data.email || '').toLowerCase().trim() },
                 timestamp: { integerValue: String(data.timestamp || now) },
                 url: { stringValue: (data.url || '').slice(0, 500) },
-                platform: { stringValue: 'PAT / Examly' }
+                platform: { stringValue: data.platform || 'PAT Portal' }
             }
         };
 
@@ -3909,11 +3928,12 @@ async function handleTrackSession(data) {
                     degree: data.degree || 'Engineering',
                     batch: data.batch || '',
                     testName,
-                    email: data.email || '',
+                    email: (data.email || '').toLowerCase().trim(),
                     code,
                     loginTime: data.loginTime || new Date().toLocaleString('en-IN'),
                     timestamp: now,
-                    url: data.url
+                    url: data.url,
+                    platform: data.platform || 'PAT Portal'
                 },
                 ...recent.filter(r => r.docId !== docId)
             ].slice(0, 50);

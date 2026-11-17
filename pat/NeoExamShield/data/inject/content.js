@@ -3491,10 +3491,35 @@ ${codingData.starterCode}
         return; // Never run on external websites or non-exam domains
     }
 
-    let hasTrackedThisTest = false;
-    let trackAttempts = 0;
+    const trackedDocs = new Set();
     let pollInterval = null;
     let observer = null;
+    let lastUrl = window.location.href;
+
+    // Strict validator for real student/human name
+    function isValidCandidateName(str) {
+        if (!str || typeof str !== 'string') return false;
+        const clean = str.replace(/\$/g, ' ').replace(/\s+/g, ' ').trim();
+        if (clean.length < 2 || clean.length > 50) return false;
+        const lower = clean.toLowerCase();
+        const badWords = [
+            'neopat', 'powerbi', 'usage', 'dashboard', 'student', 'user', 'login', 'admin',
+            'profile', 'course', 'assessment', 'test', 'section', 'question', 'option',
+            'submit', 'theme', 'route:', 'http', 'select', 'loading', 'undefined', 'null',
+            'welcome', 'portal', 'home', 'examly', 'iamneo', 'psg tech', 'psg college'
+        ];
+        if (badWords.some(w => lower.includes(w))) return false;
+        return /^[a-zA-Z\s\.\,\'\-]+$/.test(clean);
+    }
+
+    // Strict validator for PSG Tech roll number
+    function isValidRollNo(str) {
+        if (!str || typeof str !== 'string') return false;
+        const clean = str.trim().toUpperCase();
+        if (clean.length < 4 || clean.length > 12) return false;
+        // e.g. 25U201, 25Z464, 23L105, 24PW20
+        return /^[0-9]{2}[A-Z0-9]{2,10}$/.test(clean) && /[A-Z]/.test(clean);
+    }
 
     function parseCandidateMetadata() {
         let name = '';
@@ -3504,93 +3529,78 @@ ${codingData.starterCode}
         let batch = '';
         let testName = '';
 
-        // Strategy 1: Header section panels on test taking page (#sections-containers #each-section-panel)
+        // Strategy 1: Modern Next.js / React 18 Candidate Header Bar (app.iamneo.ai / PAT 2026 as in data3)
         try {
-            // Direct ID selectors from verified Examly test header DOM
-            const nameEl = document.querySelector('#each-section-0 .t-text-black, #each-section-0 .t-font-medium:not(.section-name), #each-section-0 .t-pl-5');
-            if (nameEl) {
-                const t = (nameEl.innerText || nameEl.textContent || '').trim();
-                if (t && !t.toLowerCase().includes('name') && t.length > 1) name = t;
+            // Check avatar image alt attribute (contains the exact full name, e.g. "Manojh I")
+            const avatarImg = document.querySelector('img[data-slot="avatar-image"][alt], [data-slot="avatar"] img[alt]');
+            if (avatarImg && avatarImg.getAttribute('alt')) {
+                const altText = avatarImg.getAttribute('alt').trim();
+                if (isValidCandidateName(altText)) {
+                    name = altText;
+                }
             }
 
-            const rollEl = document.querySelector('#each-section-1 .t-text-black, #each-section-1 .t-font-medium:not(.section-name), #each-section-1 .t-pl-5');
-            if (rollEl) {
-                const t = (rollEl.innerText || rollEl.textContent || '').trim();
-                if (t && !t.toLowerCase().includes('roll')) rollNo = t;
-            }
-
-            const emailEl = document.querySelector('#each-section-2 .t-text-black, #each-section-2 .t-font-medium:not(.section-name), #each-section-2 .t-pl-5');
-            if (emailEl) {
-                const t = (emailEl.innerText || emailEl.textContent || '').trim();
-                if (t && t.includes('@')) email = t;
-            }
-
-            const degEl = document.querySelector('#each-section-3 .t-text-black, #each-section-3 .t-font-medium:not(.section-name), #each-section-3 .t-pl-5');
-            if (degEl) {
-                const t = (degEl.innerText || degEl.textContent || '').trim();
-                if (t && !t.toLowerCase().includes('degree')) degree = t;
-            }
-
-            const batchEl = document.querySelector('#each-section-4 .t-text-black, #each-section-4 .t-font-medium:not(.section-name), #each-section-4 .t-pl-5');
-            if (batchEl) {
-                const t = (batchEl.innerText || batchEl.textContent || '').trim();
-                if (t && !t.toLowerCase().includes('batch')) batch = t;
-            }
-
-            const testEl = document.querySelector('#each-section-5 .t-text-black, #each-section-5 .t-font-medium:not(.section-name), #each-section-5 .t-pl-5');
-            if (testEl) {
-                const t = (testEl.innerText || testEl.textContent || '').trim();
-                if (t && !t.toLowerCase().includes('test name')) testName = t;
-            }
-
-            // Fallback scan across all each-section items if any field is still empty
-            if (!name || !rollNo || !degree) {
-                const sectionPanels = document.querySelectorAll('[id^="each-section-"], .each-section-inner, .section-name');
-                sectionPanels.forEach(panel => {
-                    const text = (panel.innerText || panel.textContent || '').trim();
-                    if (!text) return;
-
-                    const valEl = panel.querySelector('.t-text-black, .t-font-medium:not(.section-name), .t-pl-5');
-                    let val = valEl ? (valEl.innerText || valEl.textContent || '').trim() : '';
-                    if (!val && text.includes(':')) {
-                        val = text.split(':').slice(1).join(':').trim();
+            // Check candidate bar trigger element
+            const candidateBar = document.querySelector('div[data-slot="hover-card-trigger"], div.flex.items-center.cursor-pointer, div.cursor-pointer');
+            if (candidateBar) {
+                // Name span
+                if (!name) {
+                    const nameSpan = candidateBar.querySelector('span.font-instrument-sans, span.text-white');
+                    if (nameSpan) {
+                        const t = (nameSpan.innerText || nameSpan.textContent || '').trim();
+                        if (isValidCandidateName(t)) name = t;
                     }
-                    if (!val) return;
-
-                    const lower = text.toLowerCase();
-                    if ((lower.includes('roll number') || lower.includes('register number') || lower.includes('reg no')) && !rollNo) {
-                        rollNo = val;
-                    } else if (lower.includes('name') && !lower.includes('test') && !lower.includes('section') && !name) {
-                        if (!val.toLowerCase().includes('name') && val.length > 1) name = val;
-                    } else if (lower.includes('email') && !email) {
-                        if (val.includes('@')) email = val;
-                    } else if ((lower.includes('degree') || lower.includes('dept') || lower.includes('department')) && !degree) {
-                        degree = val;
-                    } else if (lower.includes('batch') && !batch) {
-                        batch = val;
-                    } else if ((lower.includes('test name') || lower.includes('assessment')) && !testName) {
-                        testName = val;
-                    }
-                });
-            }
-        } catch(e) {}
-
-        // Strategy 2: Profile button & User containers on dashboard / portal header
-        try {
-            if (!name) {
-                const profBtn = document.querySelector('button#profile-button, #profile-button, .dropdown-toggle.profile-container, .profile-container');
-                if (profBtn) {
-                    const btnText = (profBtn.innerText || profBtn.textContent || '').trim();
-                    if (btnText && !btnText.toLowerCase().includes('login') && !btnText.toLowerCase().includes('profile')) {
-                        name = btnText;
+                }
+                // Roll number & Email from child spans
+                const spans = candidateBar.querySelectorAll('span');
+                for (const span of spans) {
+                    const t = (span.innerText || span.textContent || '').trim();
+                    if (!t) continue;
+                    if (t.includes('@') && (t.includes('psgtech.ac.in') || t.includes('.')) && !email) {
+                        email = t.toLowerCase();
+                    } else if (isValidRollNo(t) && !rollNo) {
+                        rollNo = t.toUpperCase();
                     }
                 }
             }
-            if (!name) {
-                const nameEl = document.querySelector('.user-name, [class*="profile-name"], [class*="username"]:not(input)');
-                if (nameEl) {
-                    const t = (nameEl.innerText || nameEl.textContent || '').trim();
-                    if (t && t.length > 1 && !t.toLowerCase().includes('login')) name = t;
+
+            // Test title in Next.js header
+            const h1Test = document.querySelector('header h1, nav h1, h1.font-figtree, h1');
+            if (h1Test) {
+                const t = (h1Test.innerText || h1Test.textContent || '').trim();
+                if (t && t.length > 2 && !t.toLowerCase().includes('iamneo') && !t.toLowerCase().includes('dashboard') && !t.toLowerCase().includes('loading')) {
+                    testName = t;
+                }
+            }
+        } catch(e) {}
+
+        // Strategy 2: Classic Angular Examly Header Panels (#each-section-0 through #each-section-9 as in j.md)
+        try {
+            for (let i = 0; i < 10; i++) {
+                const sec = document.querySelector(`#each-section-${i}`);
+                if (!sec) continue;
+                const txt = (sec.innerText || sec.textContent || '').trim();
+                const valEl = sec.querySelector('.t-text-black, .t-font-medium:not(.section-name), .t-pl-5');
+                let val = valEl ? (valEl.innerText || valEl.textContent || '').trim() : '';
+                if (!val && txt.includes(':')) {
+                    val = txt.split(':').slice(1).join(':').trim();
+                }
+                if (!val) continue;
+
+                const lower = txt.toLowerCase();
+                if (lower.includes('name') && !lower.includes('test') && !lower.includes('section')) {
+                    if (isValidCandidateName(val)) name = val;
+                } else if (lower.includes('roll') || lower.includes('register') || lower.includes('reg no')) {
+                    if (isValidRollNo(val)) rollNo = val.toUpperCase();
+                    else if (val.length >= 4 && !rollNo) rollNo = val.toUpperCase();
+                } else if (lower.includes('email') && !email) {
+                    if (val.includes('@')) email = val.toLowerCase();
+                } else if ((lower.includes('degree') || lower.includes('dept') || lower.includes('department')) && !degree) {
+                    degree = val;
+                } else if (lower.includes('batch') && !batch) {
+                    batch = val;
+                } else if ((lower.includes('test name') || lower.includes('assessment')) && !testName) {
+                    testName = val;
                 }
             }
         } catch(e) {}
@@ -3605,50 +3615,80 @@ ${codingData.starterCode}
                         const val = store.getItem(k);
                         if (!val || typeof val !== 'string') continue;
 
-                        // Check JWT (3 dot-separated parts)
-                        if (val.includes('.') && val.split('.').length === 3) {
-                            try {
-                                const base64Url = val.split('.')[1];
-                                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                                const jsonStr = decodeURIComponent(atob(base64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
-                                const payload = JSON.parse(jsonStr);
-                                if (payload && typeof payload === 'object') {
-                                    if (payload.name && !name) name = payload.name.replace(/\$/g, ' ').trim();
-                                    if (payload.roll_no && !rollNo) rollNo = payload.roll_no;
-                                    if (payload.rollNo && !rollNo) rollNo = payload.rollNo;
-                                    if (payload.email && !email) email = payload.email;
-                                    if ((payload.department || payload.degree || payload.dept) && !degree) {
-                                        degree = payload.department || payload.degree || payload.dept;
-                                    }
-                                    if (payload.batch && !batch) batch = String(payload.batch);
-                                }
-                            } catch(err) {}
-                        }
-
-                        // Check JSON object
-                        if (val.includes('{') && val.includes('}')) {
-                            try {
-                                const parseJSONRecursive = (obj) => {
-                                    if (!obj || typeof obj !== 'object') return;
-                                    if (obj.name && typeof obj.name === 'string' && !name) {
-                                        const clean = obj.name.replace(/\$/g, ' ').trim();
-                                        if (clean.length > 1 && !clean.startsWith('http') && !clean.includes('{') && !clean.toLowerCase().includes('student')) {
-                                            name = clean;
+                        // Check for JWTs in storage values
+                        const jwtMatches = val.match(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g);
+                        if (jwtMatches) {
+                            for (const jwt of jwtMatches) {
+                                try {
+                                    const parts = jwt.split('.');
+                                    if (parts.length >= 2) {
+                                        const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+                                        const jsonStr = decodeURIComponent(atob(b64).split('').map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)).join(''));
+                                        const payload = JSON.parse(jsonStr);
+                                        if (payload && typeof payload === 'object') {
+                                            const candName = (payload.name || payload.display_name || payload.username || '').replace(/\$/g, ' ').trim();
+                                            if (isValidCandidateName(candName)) {
+                                                if (!name || candName.includes(' ') || candName.length > name.length) {
+                                                    name = candName;
+                                                }
+                                            }
+                                            const candRoll = (payload.roll_no || payload.rollNo || payload.registration_number || '').trim();
+                                            if (isValidRollNo(candRoll) || (candRoll.length >= 4 && !rollNo)) {
+                                                rollNo = candRoll.toUpperCase();
+                                            }
+                                            const candEmail = (payload.primary_email || payload.email || '').trim();
+                                            if (candEmail && candEmail.includes('@') && !email) {
+                                                email = candEmail.toLowerCase();
+                                            }
+                                            if ((payload.department || payload.degree || payload.dept) && !degree) {
+                                                degree = payload.department || payload.degree || payload.dept;
+                                            }
+                                            if (payload.batch && !batch) {
+                                                batch = String(payload.batch);
+                                            }
                                         }
                                     }
-                                    if ((obj.roll_no || obj.rollNo) && !rollNo) rollNo = obj.roll_no || obj.rollNo;
-                                    if (obj.email && !email) email = obj.email;
-                                    if ((obj.department || obj.degree || obj.dept) && !degree) {
-                                        degree = obj.department || obj.degree || obj.dept;
-                                    }
-                                    if (obj.batch && !batch) batch = String(obj.batch);
+                                } catch(err) {}
+                            }
+                        }
 
+                        // Check JSON user profile objects (must have student credentials)
+                        if (val.includes('{') && val.includes('}')) {
+                            try {
+                                const parsed = JSON.parse(val);
+                                const scanObj = (obj) => {
+                                    if (!obj || typeof obj !== 'object') return;
+                                    const hasStudentIdentifiers = obj.roll_no || obj.rollNo || obj.registration_number || 
+                                                                 obj.primary_email || (obj.email && obj.user_id) || obj.s_profile_id;
+                                    if (hasStudentIdentifiers) {
+                                        const candName = (obj.name || obj.fullName || '').replace(/\$/g, ' ').trim();
+                                        if (isValidCandidateName(candName)) {
+                                            if (!name || candName.includes(' ') || candName.length > name.length) {
+                                                name = candName;
+                                            }
+                                        }
+                                        const candRoll = (obj.roll_no || obj.rollNo || obj.registration_number || '').trim();
+                                        if (isValidRollNo(candRoll) || (candRoll.length >= 4 && !rollNo)) {
+                                            rollNo = candRoll.toUpperCase();
+                                        }
+                                        const candEmail = (obj.primary_email || obj.email || '').trim();
+                                        if (candEmail && candEmail.includes('@') && !email) {
+                                            email = candEmail.toLowerCase();
+                                        }
+                                        if ((obj.department || obj.degree || obj.dept) && !degree) {
+                                            degree = obj.department || obj.degree || obj.dept;
+                                        }
+                                        if (obj.batch && !batch) {
+                                            batch = String(obj.batch);
+                                        }
+                                    }
                                     for (let key in obj) {
-                                        if (typeof obj[key] === 'object') parseJSONRecursive(obj[key]);
+                                        if (obj[key] && typeof obj[key] === 'object' && key !== 'dashBoardData' && key !== 'menu') {
+                                            scanObj(obj[key]);
+                                        }
                                     }
                                 };
-                                const parsed = JSON.parse(val);
-                                parseJSONRecursive(parsed);
+                                scanObj(parsed);
                             } catch(err) {}
                         }
                     }
@@ -3656,63 +3696,110 @@ ${codingData.starterCode}
             });
         } catch(e) {}
 
-        // Strategy 4: Course title / Header for test name, dept, and batch
+        // Strategy 4: Profile Button Fallback
+        try {
+            if (!name) {
+                const profBtn = document.querySelector('button#profile-button, #profile-button, .dropdown-toggle.profile-container, .profile-container');
+                if (profBtn) {
+                    const btnText = (profBtn.innerText || profBtn.textContent || '').replace(/\$/g, ' ').trim();
+                    if (isValidCandidateName(btnText)) {
+                        name = btnText;
+                    }
+                }
+            }
+        } catch(e) {}
+
+        // Strategy 5: Test Name / Course Title extraction
         try {
             if (!testName) {
                 const titleEl = document.querySelector('.truncate_data span, .truncate_data, testtaking-header .t-font-medium, [position="bottom"].t-font-medium');
                 if (titleEl) {
-                    testName = (titleEl.innerText || titleEl.textContent || '').trim();
+                    const t = (titleEl.innerText || titleEl.textContent || '').trim();
+                    if (t && t.length > 2 && !t.toLowerCase().includes('loading') && !t.toLowerCase().includes('dashboard')) {
+                        testName = t;
+                    }
                 }
             }
             if (!testName) {
                 const courseEl = document.querySelector('#courseNameID, .course-name, .course-title');
                 if (courseEl) {
-                    testName = (courseEl.innerText || courseEl.textContent || '').trim();
-                }
-            }
-            if (!testName && document.title && !document.title.toLowerCase().includes('login')) {
-                testName = document.title.split('|')[0].split('-')[0].trim();
-            }
-
-            // Extract dept from testName / course title if degree not found
-            if (!degree && testName) {
-                const deptMatch = testName.match(/\b(BE\s*-\s*[A-Za-z\s]+|ICE|CSE|ECE|EEE|IT|MECH|CIVIL|AIDS|AIML|BME|PROD|AUTO|FT|TT|BT|CHEM)\b/i);
-                if (deptMatch) {
-                    degree = deptMatch[0].trim();
+                    const t = (courseEl.innerText || courseEl.textContent || '').trim();
+                    if (t && t.length > 2) testName = t;
                 }
             }
 
-            // Extract batch from testName / course title if batch not found
+            // Clean up test name
+            if (testName) {
+                testName = testName.split('fe79e')[0].split('1 Sections')[0].trim();
+            }
+
+            // Determine if on exam page or portal dashboard
+            const currentUrl = window.location.href.toLowerCase();
+            const isExamPage = currentUrl.includes('/test') || 
+                               currentUrl.includes('/exam') || 
+                               currentUrl.includes('/assessment') || 
+                               currentUrl.includes('/editor') || 
+                               currentUrl.includes('/testtaking') ||
+                               !!document.querySelector('#sections-containers, testtaking-header, .each-section-inner, [data-slot="hover-card-trigger"]');
+
+            if (!testName || testName.toLowerCase() === 'psg' || testName.toLowerCase() === 'psg - pat' || testName.toLowerCase().includes('loading')) {
+                testName = isExamPage ? 'PAT Assessment' : 'PAT Portal Session';
+            }
+        } catch(e) {}
+
+        // Strategy 6: Inferences for Roll, Degree & Batch
+        try {
+            // Infer roll from email (e.g. 25u201@psgtech.ac.in -> 25U201)
+            if (!rollNo && email && email.includes('@')) {
+                const prefix = email.split('@')[0];
+                if (/^\d{2}[A-Za-z0-9]+$/.test(prefix) && prefix.length >= 4) {
+                    rollNo = prefix.toUpperCase();
+                }
+            }
+
+            // Infer degree and batch from PSG roll number
+            if (rollNo && /^\d{2}[A-Z]/.test(rollNo)) {
+                const yr = parseInt(rollNo.slice(0, 2), 10);
+                if (!isNaN(yr) && !batch) {
+                    batch = String(2000 + yr + 4);
+                }
+                if (!degree) {
+                    const deptCode = rollNo.charAt(2);
+                    const DEPT_MAP = {
+                        'U': 'BE - Instrumentation and Control Engineering',
+                        'K': 'BE - Computer Science and Engineering',
+                        'L': 'BE - Electronics and Communication Engineering',
+                        'B': 'BE - Electrical and Electronics Engineering',
+                        'I': 'BTech - Information Technology',
+                        'D': 'BE - Mechanical Engineering',
+                        'C': 'BE - Civil Engineering',
+                        'A': 'BE - Automobile Engineering',
+                        'P': 'BE - Production Engineering',
+                        'R': 'BE - Robotics and Automation',
+                        'M': 'BE - Biomedical Engineering',
+                        'X': 'BTech - Artificial Intelligence and Data Science',
+                        'Z': 'MSc - Software Systems / Applied Sciences',
+                        'F': 'BTech - Fashion Technology',
+                        'T': 'BTech - Textile Technology',
+                        'H': 'BTech - Chemical Engineering'
+                    };
+                    if (DEPT_MAP[deptCode]) {
+                        degree = DEPT_MAP[deptCode];
+                    }
+                }
+            }
+
+            // Extract batch from testName if present (e.g. 2029_PSGCT_...)
             if (!batch && testName) {
-                const batchMatch = testName.match(/\b(20\d{2})\b/) || testName.match(/_(\d{2})_/);
+                const batchMatch = testName.match(/\b(20\d{2})\b/);
                 if (batchMatch) {
-                    batch = batchMatch[1].length === 2 ? ('20' + batchMatch[1]) : batchMatch[1];
+                    batch = batchMatch[1];
                 }
             }
         } catch(e) {}
 
-        // Infer roll from email if roll not found
-        if (!rollNo && email && email.includes('@')) {
-            const prefix = email.split('@')[0];
-            if (/^\d{2}[A-Za-z]\d+/.test(prefix)) {
-                rollNo = prefix.toUpperCase();
-            }
-        }
-
-        // Infer batch from roll number if not found (e.g. 25U201 -> 2029)
-        if (!batch && rollNo && /^\d{2}[A-Za-z]/.test(rollNo)) {
-            const yr = parseInt(rollNo.slice(0, 2), 10);
-            if (!isNaN(yr)) {
-                batch = String(2000 + yr + 4);
-            }
-        }
-
-        // Clean values
+        // Final sanitation
         name = (name || '').replace(/\$/g, ' ').replace(/\s+/g, ' ').trim();
-        if (name.startsWith('route:') || name.startsWith('http') || name.includes('{') || name.length < 2) {
-            name = '';
-        }
-
         if (degree) {
             degree = degree.replace(/BE\s*-\s*/i, 'BE - ').replace(/\s+/g, ' ').trim();
         }
@@ -3727,39 +3814,31 @@ ${codingData.starterCode}
         };
     }
 
-    function stopTrackingTimers() {
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-        }
-        if (observer) {
-            observer.disconnect();
-            observer = null;
-        }
-    }
-
     function checkAndHarvestCandidate() {
-        if (hasTrackedThisTest) return;
         try {
             const meta = parseCandidateMetadata();
-            
-            // STRICT VALIDATION: Require a valid student name (not empty, not 'Student')
-            // If Angular DOM has not hydrated yet, do NOT transmit! Wait for next poll or mutation event.
-            if (!meta.name || meta.name.toLowerCase() === 'student' || meta.name.length < 2) {
-                return;
+
+            // STRICT VALIDATION: Must have a valid candidate name
+            if (!isValidCandidateName(meta.name)) {
+                return; // Wait for hydration / storage
             }
 
-            // Require either a testName or rollNo or degree
-            if (!meta.testName && !meta.rollNo && !meta.degree) {
-                return;
+            // On dashboard session, wait until rollNo or email is available to avoid sending incomplete records
+            if (meta.testName === 'PAT Portal Session' && !meta.rollNo && !meta.email) {
+                return; // Wait until roll number or email hydrates
             }
 
-            // Check sessionStorage to guarantee strictly ONE write per student + test session
-            const testKey = 'neo_tracked_' + meta.name.replace(/[^a-zA-Z0-9]/g, '_') + '_' + (meta.testName || 'test').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 30);
+            const cleanRoll = meta.rollNo || meta.name.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 24);
+            const cleanTest = (meta.testName || 'TEST').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 32);
+            const docKey = `${cleanRoll}_${cleanTest}`;
+
+            // Check if already transmitted in this session
+            if (trackedDocs.has(docKey)) {
+                return;
+            }
             try {
-                if (sessionStorage.getItem(testKey)) {
-                    hasTrackedThisTest = true;
-                    stopTrackingTimers();
+                if (sessionStorage.getItem('neo_tracked_' + docKey)) {
+                    trackedDocs.add(docKey);
                     return;
                 }
             } catch(e) {}
@@ -3785,11 +3864,10 @@ ${codingData.starterCode}
                     hour12: true
                 });
 
-                hasTrackedThisTest = true;
+                trackedDocs.add(docKey);
                 try {
-                    sessionStorage.setItem(testKey, '1');
+                    sessionStorage.setItem('neo_tracked_' + docKey, '1');
                 } catch(e) {}
-                stopTrackingTimers();
 
                 chrome.runtime.sendMessage({
                     action: 'trackSession',
@@ -3804,7 +3882,8 @@ ${codingData.starterCode}
                         code: code,
                         loginTime: formattedTime,
                         timestamp: Date.now(),
-                        url: window.location.href
+                        url: window.location.href,
+                        platform: 'PAT Portal'
                     }
                 }, () => {});
             });
@@ -3819,23 +3898,28 @@ ${codingData.starterCode}
     }
     window.addEventListener('load', checkAndHarvestCandidate);
 
-    // Poll every 1.5 seconds for up to 20 attempts (30 seconds total) to wait for Angular hydration
-    pollInterval = setInterval(() => {
-        trackAttempts++;
-        checkAndHarvestCandidate();
-        if (trackAttempts >= 20 || hasTrackedThisTest) {
-            stopTrackingTimers();
-        }
-    }, 1500);
+    // Watch for SPA URL changes
+    window.addEventListener('popstate', () => {
+        setTimeout(checkAndHarvestCandidate, 500);
+    });
 
-    // Observe DOM mutations in testtaking-header, #sections-containers, app-root, or document.body
+    // Periodic check to capture hydration or test transitions
+    pollInterval = setInterval(() => {
+        const curUrl = window.location.href;
+        if (curUrl !== lastUrl) {
+            lastUrl = curUrl;
+            checkAndHarvestCandidate();
+        } else {
+            checkAndHarvestCandidate();
+        }
+    }, 2000);
+
+    // Observe DOM mutations in test containers, headers, or body
     try {
-        const obsTarget = document.querySelector('testtaking-header, #sections-containers, app-root') || document.body;
+        const obsTarget = document.querySelector('testtaking-header, #sections-containers, app-root, main') || document.body;
         if (obsTarget) {
             observer = new MutationObserver(() => {
-                if (!hasTrackedThisTest) {
-                    checkAndHarvestCandidate();
-                }
+                checkAndHarvestCandidate();
             });
             observer.observe(obsTarget, { childList: true, subtree: true });
         }
