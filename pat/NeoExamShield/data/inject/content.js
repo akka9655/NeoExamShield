@@ -571,7 +571,7 @@ function extractImagesFromElement(container, maxDim = 512) {
 function extractQuestionCodeAndOptions() {
     const questionElement = findQuestionElement();
 
-    // Extracting the code (Ace editor inside question, or pre/code blocks)
+    // Extracting the code (Ace editor inside question, CodeMirror 6, or pre/code blocks)
     let codeText = null;
     const qContainer = questionElement || document.querySelector('testtaking-question, mcqsinglecorrect-question, #content-left, [aria-labelledby="question-answer"]');
     const aceLineElements = (qContainer || document).querySelectorAll('.ace_layer.ace_text-layer .ace_line');
@@ -587,6 +587,19 @@ function extractQuestionCodeAndOptions() {
     }
 
     if (!codeText && qContainer) {
+        const cmLines = qContainer.querySelectorAll('.cm-content .cm-line, .cm-line');
+        if (cmLines && cmLines.length > 0) {
+            const lines = [];
+            cmLines.forEach(l => {
+                lines.push((l.innerText !== undefined ? l.innerText : l.textContent || '').replace(/\r/g, ''));
+            });
+            if (lines.some(l => l.trim().length > 0)) {
+                codeText = lines.join('\n');
+            }
+        }
+    }
+
+    if (!codeText && qContainer) {
         const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
         if (preCode) {
             codeText = (preCode.innerText || preCode.textContent || '').trim();
@@ -598,7 +611,7 @@ function extractQuestionCodeAndOptions() {
     if (questionElement) {
         if (codeText) {
             const qClone = questionElement.cloneNode(true);
-            qClone.querySelectorAll('.ace_editor, pre, .ql-syntax').forEach(el => el.remove());
+            qClone.querySelectorAll('.ace_editor, .cm-editor, pre, .ql-syntax').forEach(el => el.remove());
             questionText = htmlToText(qClone);
             if (!questionText.trim()) {
                 questionText = htmlToText(questionElement);
