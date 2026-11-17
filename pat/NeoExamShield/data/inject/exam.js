@@ -21,8 +21,8 @@ if (typeof window.isMac === 'undefined') {
   function isStrictAnswerEditor(el) {
     if (!el) return false;
     const id = (el.id || '').toLowerCase();
-    if (id.includes('header') || id.includes('footer')) return false;
-    if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
+    if (id.includes('header') || id.includes('footer') || id.includes('correct') || id.endsWith('editor2')) return false;
+    if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('[aria-labelledby="correct-answer-cont"]') || el.closest('[aria-labelledby="correct-answer-mark-cont"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
       return false;
     }
     return true;
@@ -35,8 +35,9 @@ if (typeof window.isMac === 'undefined') {
     // Check 1: Explicit center answer editor container, ID, or aria label (PSG PAT / Examly / Iamneo)
     const answerElCandidates = [
       document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
-      document.querySelector('[id*="ttAnswerEditor"]'),
-      document.querySelector('[aria-labelledby="editor-answer"]'),
+      document.querySelector('div[aria-labelledby="answer"] [id*="ttAnswerEditor"]'),
+      document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"])'),
+      document.querySelector('[aria-labelledby="editor-answer"]:not([id*="Editor2"])'),
       document.querySelector('.answer-content .ace_editor'),
       document.querySelector('#programming-editor .ace_editor')
     ];
@@ -368,7 +369,7 @@ if (typeof window.isMac === 'undefined') {
       code = text.replace(/^```[a-zA-Z0-9_+-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
       const lines = code.split('\n');
       let firstCodeLineIdx = -1;
-      const codeStartPattern = /^\s*(?:#include|#define|import\s+|package\s+|public\s+|class\s+|def\s+|int\s+|void\s+|using\s+namespace|func\s+|<\?php|const\s+|let\s+|var\s+)/;
+      const codeStartPattern = /^\s*(?:#|import\s+|from\s+|package\s+|using\s+|namespace\s+|def\s+|func\s+|fn\s+|function\s+|fun\s+|class\s+|struct\s+|union\s+|enum\s+|typedef\s+|template\s+|typename\s+|interface\s+|type\s+|public\s+|private\s+|protected\s+|static\s+|inline\s+|virtual\s+|override\s+|final\s+|abstract\s+|extern\s+|const\s+|constexpr\s+|var\s+|let\s+|val\s+|auto\s+|(?:(?:unsigned|signed|static|const|inline|extern)\s+)*(?:int|void|char|double|float|bool|boolean|long|short|size_t|ssize_t|[u]?int\d+_t)\b|[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*[{;]?|[a-zA-Z_][a-zA-Z0-9_]*\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\()/;
       for (let idx = 0; idx < lines.length; idx++) {
         if (codeStartPattern.test(lines[idx])) {
           firstCodeLineIdx = idx;
@@ -376,7 +377,11 @@ if (typeof window.isMac === 'undefined') {
         }
       }
       if (firstCodeLineIdx > 0 && firstCodeLineIdx <= 5) {
-        code = lines.slice(firstCodeLineIdx).join('\n');
+        const precedingText = lines.slice(0, firstCodeLineIdx).join(' ').trim();
+        const isConversational = /^(?:here|sure|certainly|below|solution|this\s+code|the\s+following|note)/i.test(precedingText);
+        if (isConversational) {
+          code = lines.slice(firstCodeLineIdx).join('\n');
+        }
       }
     }
 
@@ -481,7 +486,7 @@ if (typeof window.isMac === 'undefined') {
 
     const headerEl = document.querySelector('[id*="ttHeaderEditor"], [id*="HeaderEditor"], [id*="headerEditor"], [aria-labelledby="tt-header"] .ace_editor, .header-content .ace_editor');
     const footerEl = document.querySelector('[id*="ttFooterEditor"], [id*="FooterEditor"], [id*="footerEditor"], [aria-labelledby="footer"] .ace_editor, .footer-content .ace_editor');
-    const centerEl = document.querySelector('div[aria-labelledby="answer"] .ace_editor, [id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], .answer-content .ace_editor');
+    const centerEl = document.querySelector('div[aria-labelledby="answer"] .ace_editor, [id*="ttAnswerEditor"]:not([id*="Editor2"]), [aria-labelledby="editor-answer"]:not([id*="Editor2"]), .answer-content .ace_editor');
 
     return {
       headerSnippet: getVal(headerEl),
@@ -537,7 +542,7 @@ if (typeof window.isMac === 'undefined') {
       }
 
       // Notify container element for Angular / React / Vue form binding without triggering Ace's hidden TextInput listener
-      const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor, #programming-editor');
+      const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"]), [aria-labelledby="editor-answer"]:not([id*="Editor2"]), programming-answer .ace_editor, #programming-editor');
       if (containerEl) {
         try {
           containerEl.dispatchEvent(new Event('input', { bubbles: true }));
@@ -564,7 +569,7 @@ if (typeof window.isMac === 'undefined') {
     try {
       const ed = findAnswerEditor();
       if (ed) {
-        const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"], [aria-labelledby="editor-answer"], programming-answer .ace_editor, #programming-editor');
+        const containerEl = ed.container || document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"]), [aria-labelledby="editor-answer"]:not([id*="Editor2"]), programming-answer .ace_editor, #programming-editor');
         if (containerEl) {
           try {
             containerEl.dispatchEvent(new Event('input', { bubbles: true }));

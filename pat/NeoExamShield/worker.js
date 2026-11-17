@@ -796,7 +796,7 @@ function extractSingleCleanCode(rawResponse, programmingLanguage = '') {
         code = text.replace(/^```[a-zA-Z0-9_+-]*\s*\n?/, '').replace(/\n?```\s*$/, '');
         const lines = code.split('\n');
         let firstCodeLineIdx = -1;
-        const codeStartPattern = /^\s*(?:#include|#define|import\s+|package\s+|public\s+|class\s+|def\s+|int\s+|void\s+|using\s+namespace|func\s+|<\?php|const\s+|let\s+|var\s+)/;
+        const codeStartPattern = /^\s*(?:#|import\s+|from\s+|package\s+|using\s+|namespace\s+|def\s+|func\s+|fn\s+|function\s+|fun\s+|class\s+|struct\s+|union\s+|enum\s+|typedef\s+|template\s+|typename\s+|interface\s+|type\s+|public\s+|private\s+|protected\s+|static\s+|inline\s+|virtual\s+|override\s+|final\s+|abstract\s+|extern\s+|const\s+|constexpr\s+|var\s+|let\s+|val\s+|auto\s+|(?:(?:unsigned|signed|static|const|inline|extern)\s+)*(?:int|void|char|double|float|bool|boolean|long|short|size_t|ssize_t|[u]?int\d+_t)\b|[a-zA-Z_][a-zA-Z0-9_]*\s*\([^)]*\)\s*[{;]?|[a-zA-Z_][a-zA-Z0-9_]*\s+[a-zA-Z_][a-zA-Z0-9_]*\s*\()/;
         for (let idx = 0; idx < lines.length; idx++) {
             if (codeStartPattern.test(lines[idx])) {
                 firstCodeLineIdx = idx;
@@ -804,7 +804,11 @@ function extractSingleCleanCode(rawResponse, programmingLanguage = '') {
             }
         }
         if (firstCodeLineIdx > 0 && firstCodeLineIdx <= 5) {
-            code = lines.slice(firstCodeLineIdx).join('\n');
+            const precedingText = lines.slice(0, firstCodeLineIdx).join(' ').trim();
+            const isConversational = /^(?:here|sure|certainly|below|solution|this\s+code|the\s+following|note)/i.test(precedingText);
+            if (isConversational) {
+                code = lines.slice(firstCodeLineIdx).join('\n');
+            }
         }
     }
 
@@ -934,16 +938,17 @@ function handleQueryResponseForIamNeoExamly(response, tabId, isMCQ = false, isHa
                         function isStrictAnswer(el) {
                             if (!el) return false;
                             var id = (el.id || '').toLowerCase();
-                            if (id.includes('header') || id.includes('footer')) return false;
-                            if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
+                            if (id.includes('header') || id.includes('footer') || id.includes('correct') || id.endsWith('editor2')) return false;
+                            if (el.closest && (el.closest('[aria-labelledby="tt-header"]') || el.closest('[aria-labelledby="footer"]') || el.closest('[aria-labelledby="correct-answer-cont"]') || el.closest('[aria-labelledby="correct-answer-mark-cont"]') || el.closest('.header-content') || el.closest('.footer-content'))) {
                                 return false;
                             }
                             return true;
                         }
                         var answerElCandidates = [
                             document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
-                            document.querySelector('[id*="ttAnswerEditor"]'),
-                            document.querySelector('[aria-labelledby="editor-answer"]'),
+                            document.querySelector('div[aria-labelledby="answer"] [id*="ttAnswerEditor"]'),
+                            document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"])'),
+                            document.querySelector('[aria-labelledby="editor-answer"]:not([id*="Editor2"])'),
                             document.querySelector('.answer-content .ace_editor'),
                             document.querySelector('#programming-editor .ace_editor')
                         ];
@@ -2547,7 +2552,8 @@ Respond with ONLY the ${request.programmingLanguage} code inside a single code b
                             environmentArchitecture = `CRITICAL ARCHITECTURE: THREE-PART SPLIT ENVIRONMENT (HEADER + YOUR CODE + FOOTER).
 - The platform has ALREADY provided a FIXED Header Snippet at the top and a FIXED Footer Snippet at the bottom.
 - Your code will be placed directly in the EDITABLE CENTER EDITOR between Header and Footer.
-- STRICT RULE: Implement ONLY the required function(s) or missing middle logic.
+- STRICT RULE: Implement ALL required functions called in the Footer Snippet or described in the problem statement.
+- STRICT RULE: Every function MUST be complete with its FULL signature (return type, function name, parameter list, and opening/closing braces), e.g. 'double calculateTicketCost() { ... }'. DO NOT omit function return types or signatures under any circumstances.
 - STRICT RULE: DO NOT write any #include headers (they are already provided in the Header Snippet).
 - STRICT RULE: DO NOT write main() (main() is already fully implemented in the Footer Snippet).
 - Ensure your function names, parameter signatures, and return types match EXACTLY what the Footer calls.`;
@@ -2590,7 +2596,7 @@ CRITICAL RULES:
                             (request.testCases ? `Test Cases:\n${request.testCases}` : '') +
                             (hasHeader ? `\n\nHeader Snippet (pre-existing code before your answer, DO NOT include this in your response):\n${request.headerSnippet}` : '') +
                             (hasFooter ? `\n\nFooter Snippet (pre-existing code after your answer, DO NOT include this in your response):\n${request.footerSnippet}` : '') +
-                            (request.starterCode ? `\n\nExisting Stub / Template in Center Editor (complete this function signature):\n${request.starterCode}` : '') +
+                            (request.starterCode && !request.starterCode.startsWith('// You are using GCC') && !hasFooter ? `\n\nExisting Stub / Template in Center Editor (complete this function signature):\n${request.starterCode}` : '') +
                             (request.whitelist ? `\n\nWhitelisted Keywords (you MUST use these keywords/identifiers in your solution):\n${request.whitelist}` : '');
                     }
                 } else {

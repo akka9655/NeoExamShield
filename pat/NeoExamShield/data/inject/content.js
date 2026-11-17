@@ -1229,15 +1229,16 @@ async function extractCodingQuestion(isTyped = false) {
     if (!starterCode) {
         const centerEditorCandidates = [
             document.querySelector('div[aria-labelledby="answer"] .ace_editor'),
-            document.querySelector('[id*="ttAnswerEditor"]'),
-            document.querySelector('[aria-labelledby="editor-answer"]'),
+            document.querySelector('div[aria-labelledby="answer"] [id*="ttAnswerEditor"]'),
+            document.querySelector('[id*="ttAnswerEditor"]:not([id*="Editor2"])'),
+            document.querySelector('[aria-labelledby="editor-answer"]:not([id*="Editor2"])'),
             document.querySelector('.answer-content .ace_editor'),
             document.querySelector('#programming-editor .ace_editor')
         ];
         for (const cand of centerEditorCandidates) {
             if (cand) {
                 const id = (cand.id || '').toLowerCase();
-                if (!id.includes('header') && !id.includes('footer')) {
+                if (!id.includes('header') && !id.includes('footer') && !id.includes('correct') && !id.endsWith('editor2')) {
                     starterCode = getEditorSnippet(cand);
                     if (starterCode) break;
                 }
