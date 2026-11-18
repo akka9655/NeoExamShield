@@ -834,11 +834,8 @@ async function handleQuestionExtraction(autoClick = true) {
     lastTriggeredMode = activeMCQMode;
     removeMCQDot();
 
-    // 1. Extract question text
+    // 1. Locate question container and extract code snippet first (Ace, CodeMirror 6, or pre/code)
     const questionElement = findQuestionElement();
-    const questionText = questionElement ? htmlToText(questionElement) : '';
-
-    // 2. Extract code (Ace editor inside question, or pre/code blocks)
     let codeText = null;
     const qContainer = document.querySelector('testtaking-question, mcqsinglecorrect-question, programming-question, #content-left, [aria-labelledby="question-container"], [aria-labelledby="question-data-container"], [aria-labelledby="question-answer"]') || questionElement;
 
@@ -868,10 +865,39 @@ async function handleQuestionExtraction(autoClick = true) {
         }
     }
 
+    // Check for modern CodeMirror 6 editor inside question container (Next.js / PAT 2026)
+    if (!codeText && qContainer) {
+        const cmLines = qContainer.querySelectorAll('.cm-content .cm-line, .cm-line');
+        if (cmLines && cmLines.length > 0) {
+            const lines = [];
+            cmLines.forEach(l => {
+                lines.push((l.innerText !== undefined ? l.innerText : l.textContent || '').replace(/\r/g, ''));
+            });
+            if (lines.some(l => l.trim().length > 0)) {
+                codeText = lines.join('\n');
+            }
+        }
+    }
+
     if (!codeText && qContainer) {
         const preCode = qContainer.querySelector('pre code, pre, .ql-syntax');
         if (preCode) {
             codeText = (preCode.innerText || preCode.textContent || '').trim();
+        }
+    }
+
+    // Extract clean question text (strip code container to avoid prompt duplication)
+    let questionText = '';
+    if (questionElement) {
+        if (codeText) {
+            const qClone = questionElement.cloneNode(true);
+            qClone.querySelectorAll('.ace_editor, .cm-editor, pre, .ql-syntax').forEach(el => el.remove());
+            questionText = htmlToText(qClone);
+            if (!questionText.trim()) {
+                questionText = htmlToText(questionElement);
+            }
+        } else {
+            questionText = htmlToText(questionElement);
         }
     }
 
